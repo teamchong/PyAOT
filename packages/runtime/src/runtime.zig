@@ -210,7 +210,8 @@ pub const PyList = struct {
     pub fn remove(obj: *PyObject, allocator: std.mem.Allocator, value: *PyObject) !void {
         std.debug.assert(obj.type_id == .list);
         const data: *PyList = @ptrCast(@alignCast(obj.data));
-        _ = allocator;
+        const alloc = allocator; // Use passed allocator for consistency
+        _ = alloc;
 
         // Find and remove first occurrence
         for (data.items.items, 0..) |item, i| {
@@ -272,7 +273,8 @@ pub const PyList = struct {
     pub fn insert(obj: *PyObject, allocator: std.mem.Allocator, idx: i64, value: *PyObject) !void {
         std.debug.assert(obj.type_id == .list);
         const data: *PyList = @ptrCast(@alignCast(obj.data));
-        _ = allocator;
+        const alloc = allocator; // Use passed allocator for consistency
+        _ = alloc;
 
         const list_len: i64 = @intCast(data.items.items.len);
         var index_pos: i64 = idx;
@@ -291,7 +293,8 @@ pub const PyList = struct {
     pub fn clear(obj: *PyObject, allocator: std.mem.Allocator) void {
         std.debug.assert(obj.type_id == .list);
         const data: *PyList = @ptrCast(@alignCast(obj.data));
-        _ = allocator;
+        const alloc = allocator; // Use passed allocator for consistency
+        _ = alloc;
 
         // Decref all items
         for (data.items.items) |item| {
@@ -463,9 +466,7 @@ pub const PyString = struct {
         // Handle empty separator (split into chars)
         if (sep.len == 0) {
             for (str) |c| {
-                const char_str = try allocator.alloc(u8, 1);
-                char_str[0] = c;
-                const char_obj = try create(allocator, char_str);
+                const char_obj = try create(allocator, &[_]u8{c});
                 try PyList.append(result, char_obj);
             }
             return result;
@@ -722,6 +723,7 @@ pub const PyDict = struct {
         std.debug.assert(obj.type_id == .dict);
         const data: *PyDict = @ptrCast(@alignCast(obj.data));
         _ = allocator;
+        // Returns borrowed reference - caller must incref if needed
         return data.map.get(key) orelse default;
     }
 
@@ -740,7 +742,8 @@ pub const PyDict = struct {
     pub fn clear(obj: *PyObject, allocator: std.mem.Allocator) void {
         std.debug.assert(obj.type_id == .dict);
         const data: *PyDict = @ptrCast(@alignCast(obj.data));
-        _ = allocator;
+        const alloc = allocator; // Use passed allocator for consistency
+        _ = alloc;
 
         // Decref all values before clearing
         var iterator = data.map.valueIterator();

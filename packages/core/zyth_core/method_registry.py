@@ -167,7 +167,7 @@ METHOD_REGISTRY: dict[str, MethodInfo] = {
         return_type=ReturnType.PRIMITIVE_INT,
         arg_types=[ArgType.PYOBJECT],
     ),
-    "count": MethodInfo(
+    "string.count": MethodInfo(
         name="count",
         runtime_type="PyString",
         runtime_fn="count_substr",  # Different name to avoid conflict with list.count
@@ -223,7 +223,7 @@ METHOD_REGISTRY: dict[str, MethodInfo] = {
         arg_types=[],
         is_statement=True,
     ),
-    "count": MethodInfo(
+    "list.count": MethodInfo(
         name="count",
         runtime_type="PyList",
         runtime_fn="count",
@@ -288,25 +288,14 @@ def get_method_info(method_name: str, obj_type: Optional[str] = None) -> Optiona
     For methods like 'count' that exist on multiple types, obj_type helps disambiguate.
     obj_type can be "string", "list", etc. from var_types tracking.
     """
+    # Try qualified lookup first (e.g., "string.count", "list.count")
+    if obj_type:
+        qualified_key = f"{obj_type}.{method_name}"
+        if qualified_key in METHOD_REGISTRY:
+            return METHOD_REGISTRY[qualified_key]
+
+    # Fall back to unqualified lookup for methods that don't need disambiguation
     method_info = METHOD_REGISTRY.get(method_name)
-
-    # If no type hint or method not in registry, return what we have
-    if not obj_type or not method_info:
-        return method_info
-
-    # For "count", check if we need the list or string version
-    if method_name == "count":
-        if obj_type == "list":
-            # Look for PyList.count in registry
-            for info in METHOD_REGISTRY.values():
-                if info.name == "count" and info.runtime_type == "PyList":
-                    return info
-        elif obj_type == "string":
-            # Look for PyString.count_substr in registry
-            for info in METHOD_REGISTRY.values():
-                if info.name == "count" and info.runtime_type == "PyString":
-                    return info
-
     return method_info
 
 

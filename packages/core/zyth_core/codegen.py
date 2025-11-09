@@ -706,36 +706,63 @@ class ZigCodeGenerator:
             obj_code = parts[2]
 
             if len(parts) > 3:
-                arg_code = parts[3]
-                arg_try = parts[4] == "True" if len(parts) > 4 else False
+                # Parse all arguments (format: "arg1|||try1;;;arg2|||try2")
+                args_encoded = parts[3]
+                args_list = []
+                if args_encoded:
+                    for arg_part in args_encoded.split(";;;"):
+                        if "|||" in arg_part:
+                            arg_code, arg_try_str = arg_part.split("|||")
+                            args_list.append((arg_code, arg_try_str == "True"))
 
-                if not arg_try:
-                    # Primitive - wrap in PyInt first (except for extend which needs a list)
-                    if method_type != "list_extend":
+                # Handle methods by type
+                if method_type == "list_append":
+                    arg_code, arg_try = args_list[0]
+                    if arg_try:
+                        self.emit(f"try runtime.PyList.append({obj_code}, {arg_code});")
+                    else:
                         temp_var = f"_{method_type}_arg_{id(node)}"
                         self.emit(f"const {temp_var} = try runtime.PyInt.create(allocator, {arg_code});")
-
-                        if method_type == "list_append":
-                            self.emit(f"try runtime.PyList.append({obj_code}, {temp_var});")
-                        elif method_type == "list_remove":
-                            self.emit(f"try runtime.PyList.remove({obj_code}, allocator, {temp_var});")
-
+                        self.emit(f"try runtime.PyList.append({obj_code}, {temp_var});")
                         self.emit(f"runtime.decref({temp_var}, allocator);")
-                    else:
-                        # extend needs a list, not a wrapped primitive
-                        self.emit(f"try runtime.PyList.extend({obj_code}, {arg_code});")
-                else:
-                    # Already PyObject
-                    if method_type == "list_append":
-                        self.emit(f"try runtime.PyList.append({obj_code}, {arg_code});")
-                    elif method_type == "list_remove":
+
+                elif method_type == "list_remove":
+                    arg_code, arg_try = args_list[0]
+                    if arg_try:
                         self.emit(f"try runtime.PyList.remove({obj_code}, allocator, {arg_code});")
-                    elif method_type == "list_extend":
-                        self.emit(f"try runtime.PyList.extend({obj_code}, {arg_code});")
+                    else:
+                        temp_var = f"_{method_type}_arg_{id(node)}"
+                        self.emit(f"const {temp_var} = try runtime.PyInt.create(allocator, {arg_code});")
+                        self.emit(f"try runtime.PyList.remove({obj_code}, allocator, {temp_var});")
+                        self.emit(f"runtime.decref({temp_var}, allocator);")
+
+                elif method_type == "list_extend":
+                    arg_code, arg_try = args_list[0]
+                    self.emit(f"try runtime.PyList.extend({obj_code}, {arg_code});")
+
+                elif method_type == "list_insert":
+                    # insert has 2 args: index (primitive) and value (any)
+                    index_code, index_try = args_list[0]
+                    value_code, value_try = args_list[1]
+
+                    if value_try:
+                        # Value is already PyObject
+                        self.emit(f"try runtime.PyList.insert({obj_code}, allocator, {index_code}, {value_code});")
+                    else:
+                        # Value is primitive - wrap it
+                        temp_var = f"_{method_type}_val_{id(node)}"
+                        self.emit(f"const {temp_var} = try runtime.PyInt.create(allocator, {value_code});")
+                        self.emit(f"try runtime.PyList.insert({obj_code}, allocator, {index_code}, {temp_var});")
+                        self.emit(f"runtime.decref({temp_var}, allocator);")
+
+                elif method_type == "list_clear":
+                    self.emit(f"runtime.PyList.clear({obj_code}, allocator);")
             else:
                 # No args (like reverse)
                 if method_type == "list_reverse":
                     self.emit(f"runtime.PyList.reverse({obj_code});")
+                elif method_type == "list_clear":
+                    self.emit(f"runtime.PyList.clear({obj_code}, allocator);")
             return
 
         if needs_try:
@@ -876,13 +903,17 @@ class ZigCodeGenerator:
                 if not method_info:
                     raise NotImplementedError(f"Method {method_name} not supported")
 
-                # Special handling for statement methods (like append, remove, extend, reverse)
+                # Special handling for statement methods (like append, remove, extend, reverse, insert, clear)
                 if method_info.is_statement:
                     # Mark for special handling in visit_Expr
                     marker_name = f"list_{method_name}"
                     if args:
-                        arg_code, arg_try = args[0]
-                        return (f"__{marker_name}__{obj_code}__{arg_code}__{arg_try}", True)
+                        # Encode all arguments in the marker
+                        arg_parts = []
+                        for arg_code, arg_try in args:
+                            arg_parts.append(f"{arg_code}|||{arg_try}")
+                        args_encoded = ";;;".join(arg_parts)
+                        return (f"__{marker_name}__{obj_code}__{args_encoded}", True)
                     else:
                         # No args (like reverse)
                         return (f"__{marker_name}__{obj_code}", True)
