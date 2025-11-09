@@ -472,7 +472,7 @@ class ZigCodeGenerator:
                         self.emit(f"runtime.decref({temp_var}, allocator);")
                 return
 
-            # Special handling for binary ops with subscripts (e.g., total + list[i])
+            # Special handling for binary ops with PyObjects (e.g., total + list[i] or total + list.pop())
             if isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Add):
                 left_code, left_try = self.visit_expr(node.value.left)
                 right_code, right_try = self.visit_expr(node.value.right)
@@ -485,6 +485,11 @@ class ZigCodeGenerator:
                 right_expr = right_code
                 if isinstance(node.value.right, ast.Subscript):
                     right_expr = f"runtime.PyInt.getValue({right_code})"
+                # Also check if right side is a method call that returns PyObject (like pop())
+                elif isinstance(node.value.right, ast.Call) and isinstance(node.value.right.func, ast.Attribute):
+                    method_name = node.value.right.func.attr
+                    if method_name == "pop":
+                        right_expr = f"runtime.PyInt.getValue({right_code})"
 
                 # If we modified either expression, use the extracted values
                 if left_expr != left_code or right_expr != right_code:
