@@ -16,6 +16,7 @@ class ZigCodeGenerator:
         self.needs_allocator = False  # Track if we need allocator
         self.declared_vars: set[str] = set()  # Track declared variables
         self.reassigned_vars: set[str] = set()  # Track variables that are reassigned
+        self.var_types: dict[str, str] = {}  # Track variable types: "int", "string", "list", "pyint"
 
     def indent(self) -> str:
         """Get current indentation"""
@@ -30,6 +31,12 @@ class ZigCodeGenerator:
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             self.needs_runtime = True
             self.needs_allocator = True
+        elif isinstance(node, ast.List):
+            # List literal requires runtime
+            self.needs_runtime = True
+            self.needs_allocator = True
+            for elem in node.elts:
+                self._detect_runtime_needs(elem)
         elif isinstance(node, ast.BinOp):
             # Check if string concatenation
             self._detect_runtime_needs(node.left)
@@ -374,6 +381,39 @@ class ZigCodeGenerator:
                         self.emit(f"defer runtime.decref({target.id}, allocator);")
                     return
 
+            # Special handling for list literals
+            if isinstance(node.value, ast.List):
+                # Track this as a list type
+                self.var_types[target.id] = "list"
+
+                # Create empty list
+                if is_first_assignment:
+                    self.emit(f"{var_keyword} {target.id} = try runtime.PyList.create(allocator);")
+                    self.emit(f"defer runtime.decref({target.id}, allocator);")
+                else:
+                    self.emit(f"{target.id} = try runtime.PyList.create(allocator);")
+
+                # Append each element
+                for elem in node.value.elts:
+                    elem_code, elem_try = self.visit_expr(elem)
+                    if elem_try:
+                        # PyObject - need to create it first
+                        temp_var = f"_temp_elem_{id(elem)}"
+                        self.emit(f"const {temp_var} = try {elem_code};")
+                        self.emit(f"try runtime.PyList.append({target.id}, {temp_var});")
+                        self.emit(f"runtime.decref({temp_var}, allocator);")
+                    else:
+                        # Primitive value - wrap in PyInt
+                        temp_var = f"_temp_elem_{id(elem)}"
+                        self.emit(f"const {temp_var} = try runtime.PyInt.create(allocator, {elem_code});")
+                        self.emit(f"try runtime.PyList.append({target.id}, {temp_var});")
+                        self.emit(f"runtime.decref({temp_var}, allocator);")
+                return
+
+            # Special handling for subscript assignment (track as pyint)
+            if isinstance(node.value, ast.Subscript):
+                self.var_types[target.id] = "pyint"
+
             # Default path
             value_code, needs_try = self.visit_expr(node.value)
             if is_first_assignment:
@@ -438,6 +478,19 @@ class ZigCodeGenerator:
                 op = self.visit_bin_op(node.op)
                 return (f"{left_code} {op} {right_code}", False)
 
+        elif isinstance(node, ast.List):
+            # List literal -> PyList.create + append items
+            # This returns a unique temp var name that caller must handle
+            return (f"__list_literal_{id(node)}", True)
+
+        elif isinstance(node, ast.Subscript):
+            # List/dict indexing: obj[index]
+            value_code, value_try = self.visit_expr(node.value)
+            index_code, index_try = self.visit_expr(node.slice)
+
+            # For now, assume it's a list with integer index
+            return (f"runtime.PyList.getItem({value_code}, @intCast({index_code}))", False)
+
         elif isinstance(node, ast.Call):
             func_code, func_try = self.visit_expr(node.func)
             args = [self.visit_expr(arg) for arg in node.args]
@@ -448,16 +501,31 @@ class ZigCodeGenerator:
                     arg_code, arg_needs_try = args[0]
                     # Check if we're in runtime mode (PyObject types)
                     if self.needs_runtime:
-                        # In runtime mode, assume variables are PyObjects
-                        if isinstance(node.args[0], ast.Name):
+                        # Check if it's a subscript (returns PyObject*)
+                        if isinstance(node.args[0], ast.Subscript):
+                            # Subscript returns PyObject* - need to extract value
+                            # For now, assume it's PyInt
+                            return (f'std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({arg_code})}})', False)
+                        # In runtime mode, check variable type
+                        elif isinstance(node.args[0], ast.Name):
                             arg_name = node.args[0].id
-                            return (f'std.debug.print("{{s}}\\n", .{{PyString.getValue({arg_name})}})', False)
+                            var_type = self.var_types.get(arg_name, "string")
+                            if var_type == "pyint":
+                                return (f'std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({arg_name})}})', False)
+                            else:
+                                # Default to string
+                                return (f'std.debug.print("{{s}}\\n", .{{PyString.getValue({arg_name})}})', False)
                         elif arg_needs_try:
                             # Expression that creates PyObject
                             return (f'std.debug.print("{{s}}\\n", .{{PyString.getValue(try {arg_code})}})', False)
                     # Primitive types (int, float, etc)
                     return (f'std.debug.print("{{}}\\n", .{{{arg_code}}})', False)
                 return (f'std.debug.print("\\n", .{{}})', False)
+
+            # Special handling for len()
+            if func_code == "len" and args:
+                arg_code, arg_try = args[0]
+                return (f"runtime.PyList.len({arg_code})", False)
 
             # Regular function call
             args_str = ", ".join(arg[0] for arg in args)
