@@ -247,20 +247,34 @@ class ZigCodeGenerator:
             left_is_pyobject = parts[3] == "True"
             right_code = parts[4]
 
-            # Check if right side is a dict (based on var_types tracking)
-            is_dict = False
+            # Check if right side is a dict or string (based on var_types tracking)
+            handled = False
             if isinstance(node.test, ast.Compare) and isinstance(node.test.comparators[0], ast.Name):
                 right_var = node.test.comparators[0].id
-                if self.var_types.get(right_var) == "dict":
+                right_type = self.var_types.get(right_var)
+
+                if right_type == "dict":
                     # Dict 'in' operator - check for string key
                     # Extract string value from the left side of the comparison
                     if isinstance(node.test.left, ast.Constant) and isinstance(node.test.left.value, str):
                         key_str = node.test.left.value
                         test_code = f'runtime.PyDict.contains({right_code}, "{key_str}")'
-                        is_dict = True
+                        handled = True
+
+                elif right_type == "string":
+                    # String 'in' operator - substring search
+                    # Need to create temp variable for left side (substring) if it's a creation call
+                    if left_is_pyobject and left_code.startswith("runtime.PyString.create"):
+                        temp_var = f"_in_substr_{id(node)}"
+                        self.emit(f"const {temp_var} = try {left_code};")
+                        self.emit(f"defer runtime.decref({temp_var}, allocator);")
+                        test_code = f"runtime.PyString.contains({right_code}, {temp_var})"
+                    else:
+                        test_code = f"runtime.PyString.contains({right_code}, {left_code})"
+                    handled = True
 
             # List 'in' operator - need to wrap primitive in PyInt
-            if not is_dict:
+            if not handled:
                 if not left_is_pyobject:
                     temp_var = f"_in_check_value_{id(node)}"
                     self.emit(f"const {temp_var} = try runtime.PyInt.create(allocator, {left_code});")
@@ -535,6 +549,10 @@ class ZigCodeGenerator:
                     else:
                         self.emit(f"{target.id} = {left_expr} {op} {right_expr};")
                     return
+
+            # Track type for simple string constants
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                self.var_types[target.id] = "string"
 
             # Default path
             value_code, needs_try = self.visit_expr(node.value)

@@ -253,6 +253,31 @@ pub const PyString = struct {
         };
         return new_obj;
     }
+
+    pub fn contains(obj: *PyObject, substring: *PyObject) bool {
+        std.debug.assert(obj.type_id == .string);
+        std.debug.assert(substring.type_id == .string);
+        const haystack_data: *PyString = @ptrCast(@alignCast(obj.data));
+        const needle_data: *PyString = @ptrCast(@alignCast(substring.data));
+
+        const haystack = haystack_data.data;
+        const needle = needle_data.data;
+
+        // Empty string is always contained
+        if (needle.len == 0) return true;
+
+        // Needle longer than haystack
+        if (needle.len > haystack.len) return false;
+
+        // Search for substring
+        var i: usize = 0;
+        while (i <= haystack.len - needle.len) : (i += 1) {
+            if (std.mem.eql(u8, haystack[i..i + needle.len], needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 
 /// Python dict type (simplified - using StringHashMap)
