@@ -470,6 +470,82 @@ class ZigCodeGenerator:
                         self.emit(f"runtime.decref({temp_var}, allocator);")
                 return
 
+            # Special handling for list comprehensions
+            if isinstance(node.value, ast.ListComp):
+                # Track this as a list type
+                self.var_types[target.id] = "list"
+
+                # Create empty list
+                if is_first_assignment:
+                    self.emit(f"{var_keyword} {target.id} = try runtime.PyList.create(allocator);")
+                    self.emit(f"defer runtime.decref({target.id}, allocator);")
+                else:
+                    self.emit(f"{target.id} = try runtime.PyList.create(allocator);")
+
+                # Generate for loop for comprehension
+                comp = node.value.generators[0]  # For now, handle single generator
+
+                # Extract loop variable name
+                if not isinstance(comp.target, ast.Name):
+                    raise NotImplementedError("List comprehension only supports simple loop variables for now")
+                loop_var = comp.target.id
+
+                iter_code, iter_try = self.visit_expr(comp.iter)
+
+                # Check if iterating over a list variable
+                if isinstance(comp.iter, ast.Name):
+                    source_var = comp.iter.id
+                    # Generate for loop using range(len(source))
+                    self.emit(f"var {loop_var}_idx: i64 = 0;")
+                    self.emit(f"while ({loop_var}_idx < @as(i64, @intCast(runtime.PyList.len({source_var})))) : ({loop_var}_idx += 1) {{")
+                    self.indent_level += 1
+
+                    # Get item from source list
+                    self.emit(f"const {loop_var} = runtime.PyList.getItem({source_var}, @intCast({loop_var}_idx));")
+
+                    # Track loop variable as pyint (PyObject containing int)
+                    self.var_types[loop_var] = "pyint"
+
+                    # Check for filter conditions
+                    if comp.ifs:
+                        # Generate if statement for filter
+                        for filter_expr in comp.ifs:
+                            filter_code, filter_try = self.visit_expr(filter_expr)
+                            self.emit(f"if ({filter_code}) {{")
+                            self.indent_level += 1
+
+                    # Evaluate the element expression and append
+                    elem_code, elem_try = self.visit_expr(node.value.elt)
+
+                    # Check if the element is just the loop variable itself
+                    if elem_code == loop_var:
+                        # Loop variable from list is already a PyObject, append directly
+                        self.emit(f"try runtime.PyList.append({target.id}, {elem_code});")
+                    elif elem_try:
+                        # PyObject result
+                        temp_var = f"_comp_elem_{id(node.value)}"
+                        self.emit(f"const {temp_var} = try {elem_code};")
+                        self.emit(f"try runtime.PyList.append({target.id}, {temp_var});")
+                        self.emit(f"runtime.decref({temp_var}, allocator);")
+                    else:
+                        # Primitive result - wrap in PyInt
+                        temp_var = f"_comp_elem_{id(node.value)}"
+                        self.emit(f"const {temp_var} = try runtime.PyInt.create(allocator, {elem_code});")
+                        self.emit(f"try runtime.PyList.append({target.id}, {temp_var});")
+                        self.emit(f"runtime.decref({temp_var}, allocator);")
+
+                    # Close filter if statements
+                    if comp.ifs:
+                        for _ in comp.ifs:
+                            self.indent_level -= 1
+                            self.emit("}")
+
+                    self.indent_level -= 1
+                    self.emit("}")
+                else:
+                    raise NotImplementedError("List comprehension only supports iterating over list variables for now")
+                return
+
             # Special handling for subscript assignment (track as pyint)
             if isinstance(node.value, ast.Subscript):
                 self.var_types[target.id] = "pyint"
@@ -636,9 +712,18 @@ class ZigCodeGenerator:
                 return (f"__in_operator__{left_code}__{left_try}__{right_code}", False)
 
             # Regular comparison operators
+            # Check if either operand is a pyint variable (needs getValue)
+            left_expr = left_code
+            if isinstance(node.left, ast.Name) and self.var_types.get(node.left.id) == "pyint":
+                left_expr = f"runtime.PyInt.getValue({left_code})"
+
+            right_expr = right_code
+            if isinstance(node.comparators[0], ast.Name) and self.var_types.get(node.comparators[0].id) == "pyint":
+                right_expr = f"runtime.PyInt.getValue({right_code})"
+
             op = self.visit_compare_op(node.ops[0])
             # Comparisons don't need try for now
-            return (f"{left_code} {op} {right_code}", False)
+            return (f"{left_expr} {op} {right_expr}", False)
 
         elif isinstance(node, ast.BinOp):
             left_code, left_try = self.visit_expr(node.left)
@@ -650,13 +735,27 @@ class ZigCodeGenerator:
                 return (f"runtime.PyString.concat(allocator, {left_code}, {right_code})", True)
             else:
                 # Numeric operation
+                # Check if either operand is a pyint variable (needs getValue)
+                left_expr = left_code
+                if isinstance(node.left, ast.Name) and self.var_types.get(node.left.id) == "pyint":
+                    left_expr = f"runtime.PyInt.getValue({left_code})"
+
+                right_expr = right_code
+                if isinstance(node.right, ast.Name) and self.var_types.get(node.right.id) == "pyint":
+                    right_expr = f"runtime.PyInt.getValue({right_code})"
+
                 op = self.visit_bin_op(node.op)
-                return (f"{left_code} {op} {right_code}", False)
+                return (f"{left_expr} {op} {right_expr}", False)
 
         elif isinstance(node, ast.List):
             # List literal -> PyList.create + append items
             # This returns a unique temp var name that caller must handle
             return (f"__list_literal_{id(node)}", True)
+
+        elif isinstance(node, ast.ListComp):
+            # List comprehension -> create list + loop + append
+            # Store comprehension info for later generation
+            return (f"__list_comp_{id(node)}", True)
 
         elif isinstance(node, ast.Dict):
             # Dict literal -> PyDict.create + set items
