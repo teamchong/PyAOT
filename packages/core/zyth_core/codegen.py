@@ -346,14 +346,20 @@ class ZigCodeGenerator:
             if isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Add):
                 parts_code = []
                 uses_runtime = False
+                has_string = False
                 for part in self._flatten_binop_chain(node.value, ast.Add):
                     part_code, part_try = self.visit_expr(part)
                     parts_code.append((part_code, part_try))
                     if part_try:
                         uses_runtime = True
+                    # Check if this part is actually a string
+                    if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                        has_string = True
+                    elif isinstance(part, ast.Name) and self.var_types.get(part.id) == "string":
+                        has_string = True
 
-                # If we're in runtime mode (strings), use PyObject concat
-                if self.needs_runtime or uses_runtime:
+                # Only use PyString.concat if we're actually concatenating strings
+                if has_string and (self.needs_runtime or uses_runtime):
                     # Generate temp variables for each part
                     temp_vars = []
                     for i, (part_code, part_try) in enumerate(parts_code):
@@ -460,6 +466,34 @@ class ZigCodeGenerator:
                         self.emit(f'try runtime.PyDict.set({target.id}, "{key_str}", {temp_var});')
                         self.emit(f"runtime.decref({temp_var}, allocator);")
                 return
+
+            # Special handling for binary ops with subscripts (e.g., total + list[i])
+            if isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Add):
+                left_code, left_try = self.visit_expr(node.value.left)
+                right_code, right_try = self.visit_expr(node.value.right)
+
+                # If either side is a subscript (returns PyObject), extract the value
+                left_expr = left_code
+                if isinstance(node.value.left, ast.Subscript):
+                    left_expr = f"runtime.PyInt.getValue({left_code})"
+
+                right_expr = right_code
+                if isinstance(node.value.right, ast.Subscript):
+                    right_expr = f"runtime.PyInt.getValue({right_code})"
+
+                # If we modified either expression, use the extracted values
+                if left_expr != left_code or right_expr != right_code:
+                    # Track this as primitive int
+                    self.var_types[target.id] = "int"
+                    op = self.visit_bin_op(node.value.op)
+                    if is_first_assignment:
+                        if var_keyword == "var":
+                            self.emit(f"{var_keyword} {target.id}: i64 = {left_expr} {op} {right_expr};")
+                        else:
+                            self.emit(f"{var_keyword} {target.id} = {left_expr} {op} {right_expr};")
+                    else:
+                        self.emit(f"{target.id} = {left_expr} {op} {right_expr};")
+                    return
 
             # Default path
             value_code, needs_try = self.visit_expr(node.value)
@@ -585,6 +619,9 @@ class ZigCodeGenerator:
                             var_type = self.var_types.get(arg_name, "string")
                             if var_type == "pyint":
                                 return (f'std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({arg_name})}})', False)
+                            elif var_type == "int":
+                                # Primitive int
+                                return (f'std.debug.print("{{}}\\n", .{{{arg_name}}})', False)
                             else:
                                 # Default to string
                                 return (f'std.debug.print("{{s}}\\n", .{{PyString.getValue({arg_name})}})', False)
