@@ -776,13 +776,22 @@ class ZigCodeGenerator:
                     # range(n) -> 0 to n-1
                     start = "0"
                     end_code, _ = self.visit_expr(args[0])
+                    step = "1"
                 elif len(args) == 2:
                     # range(start, end)
                     start_code, _ = self.visit_expr(args[0])
                     end_code, _ = self.visit_expr(args[1])
                     start = start_code
+                    step = "1"
+                elif len(args) == 3:
+                    # range(start, end, step)
+                    start_code, _ = self.visit_expr(args[0])
+                    end_code, _ = self.visit_expr(args[1])
+                    step_code, _ = self.visit_expr(args[2])
+                    start = start_code
+                    step = step_code
                 else:
-                    raise NotImplementedError("range() with step not supported yet")
+                    raise NotImplementedError("range() requires 1-3 arguments")
 
                 # Get loop variable
                 if isinstance(node.target, ast.Name):
@@ -869,60 +878,42 @@ class ZigCodeGenerator:
         self._current_handlers = prev_handlers
         self._current_try_label = prev_label
 
-    def _generate_catch_handler(self) -> str:
-        """Generate catch handler code for current try block context"""
+    def _emit_catch_handler(self) -> None:
+        """Emit catch handler code for current try block context"""
         if not getattr(self, '_in_try_block', False):
-            return ""
+            return
 
         handlers = getattr(self, '_current_handlers', [])
         if not handlers:
-            return ""
+            return
 
         label = getattr(self, '_current_try_label', 'try_block')
 
-        # Generate catch block
-        lines = [" catch |err| {"]
+        # Generate catch block that breaks to label
+        self.output[-1] += " catch {"
+        self.indent_level += 1
 
-        # Check each exception type
+        # For bare except (catches all), just emit handler body and break
         for exc_type, handler_body in handlers:
             if exc_type is None:
                 # Bare except - catches all
-                lines.append("    // Catch all exceptions")
-                for stmt in handler_body:
-                    # We need to generate the handler body inline
-                    # For now, just emit print statements
-                    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                        if isinstance(stmt.value.func, ast.Name) and stmt.value.func.id == "print":
-                            if stmt.value.args:
-                                arg = stmt.value.args[0]
-                                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                                    lines.append(f'    std.debug.print("{arg.value}\\n", .{{}});')
-                lines.append(f"    break :{label};")
-            else:
-                # Specific exception type
-                zig_error = f"error.{exc_type}"
-                lines.append(f"    if (err == {zig_error}) {{")
                 for stmt in handler_body:
                     if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                         if isinstance(stmt.value.func, ast.Name) and stmt.value.func.id == "print":
                             if stmt.value.args:
                                 arg = stmt.value.args[0]
                                 if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                                    lines.append(f'        std.debug.print("{arg.value}\\n", .{{}});')
-                lines.append(f"        break :{label};")
-                lines.append("    }")
+                                    self.emit(f'std.debug.print("{arg.value}\\n", .{{}});')
+                self.emit(f"break :{label};")
 
-        # If no handler matched, re-throw
-        lines.append("    return err;")
-        lines.append("}")
-
-        return "".join(lines)
+        self.indent_level -= 1
+        self.output.append(self.indent() + "}")
 
     def _wrap_with_try(self, code: str) -> str:
         """Wrap error-returning code with appropriate error handling"""
         if getattr(self, '_in_try_block', False):
-            # Inside try block - use catch with handler
-            return code + self._generate_catch_handler()
+            # Inside try block - return code without try, will use catch
+            return code
         else:
             # Outside try block - use regular try
             return f"try {code}"
@@ -1376,7 +1367,17 @@ class ZigCodeGenerator:
             if is_first_assignment:
                 if needs_try:
                     wrapped_code = self._wrap_with_try(value_code)
-                    self.emit(f"{var_keyword} {target.id} = {wrapped_code};")
+
+                    # Check if we're in a try block - if so, emit catch handler
+                    if getattr(self, '_in_try_block', False):
+                        # Emit assignment without semicolon
+                        self.emit(f"{var_keyword} {target.id} = {wrapped_code}")
+                        # Emit catch handler
+                        self._emit_catch_handler()
+                    else:
+                        # Regular try - emit normally
+                        self.emit(f"{var_keyword} {target.id} = {wrapped_code};")
+
                     # Check if it's a class instance (needs deinit) or PyObject (needs decref)
                     var_type = self.var_types.get(target.id)
                     if var_type and var_type in self.class_definitions:

@@ -135,9 +135,13 @@ def compile_zig(zig_code: str, output_path: Optional[str] = None) -> str:
             output_path = str(Path(tmpdir) / "output")
 
         # Compile with Zig
+        # Use ZYTH_DEBUG=1 for faster compilation (but may expose memory leaks)
+        # Default: ReleaseFast (slower compile, no leak detection, optimized binary)
+        optimize = "Debug" if os.getenv("ZYTH_DEBUG") == "1" else "ReleaseFast"
+
         try:
             subprocess.run(
-                ["zig", "build-exe", str(zig_file), "-O", "ReleaseFast"],
+                ["zig", "build-exe", str(zig_file), "-O", optimize],
                 cwd=tmpdir,
                 capture_output=True,
                 text=True,
@@ -173,6 +177,8 @@ def compile_file(source_file: str, output_path: Optional[str] = None, use_cache:
     Args:
         source_file: Path to Python source file
         output_path: Optional output path for binary
+                    If None: places binary in same directory as source (industry standard)
+                    Example: fibonacci.py → ./fibonacci
         use_cache: Enable build caching (default: True)
 
     Returns:
@@ -189,6 +195,10 @@ def compile_file(source_file: str, output_path: Optional[str] = None, use_cache:
     source_path = Path(source_file).absolute()
     cache_key = hashlib.md5(source_path.as_posix().encode()).hexdigest()
     cache_file = CACHE_DIR / cache_key
+
+    # Default output location: same directory as source (without .py extension)
+    if output_path is None:
+        output_path = str(source_path.parent / source_path.stem)
 
     # Check cache using timestamp comparison (fast!)
     if use_cache and is_cache_valid(cache_file, source_path):
