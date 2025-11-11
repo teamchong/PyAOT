@@ -28,5 +28,7 @@ class CodegenHelpers:
             ast.Mult: "*",
             ast.Div: "/",
             ast.Mod: "%",
+            ast.FloorDiv: "//",
+            ast.Pow: "**",
         }
         return op_map.get(type(op), "+")

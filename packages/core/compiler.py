@@ -140,7 +140,7 @@ def compile_zig(zig_code: str, output_path: Optional[str] = None) -> str:
                 pylist_lines.append(line)
 
             # Remove pylist import from runtime and adjust runtime code
-            runtime_lines = []
+            runtime_lines: list[str] = []
             skip_next_blank = False
             for line in runtime_code.split("\n"):
                 # Skip pylist import lines
@@ -357,7 +357,7 @@ def compile_zig(zig_code: str, output_path: Optional[str] = None) -> str:
 
         # Remove imports from generated code since runtime has them
         zig_code_lines = zig_code.split("\n")
-        new_lines = []
+        new_lines: list[str] = []
         for line in zig_code_lines:
             # Skip import lines - runtime already has them
             if '@import("runtime")' in line or (line.strip().startswith('const std = @import("std")') and new_lines == []):

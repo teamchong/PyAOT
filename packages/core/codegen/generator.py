@@ -35,7 +35,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
         self.list_element_types: dict[str, str] = {}  # Track list element types: "string", "int"
         self.tuple_element_types: dict[str, str] = {}  # Track tuple element types: "string", "int"
         self.function_signatures: dict[str, dict] = {}  # Track function signatures for proper calling
-        self.class_definitions: dict[str, ClassInfo] = {}  # Track class definitions
+        self.class_definitions: dict[str, ClassInfo] = {}  # Track class definitions  # type: ignore[assignment]
         self.current_class: Optional[str] = None  # Track which class we're currently in
         self.imported_modules: Dict[str, ParsedModule] = imported_modules or {}  # Track imported modules
         self.module_functions: Dict[str, Dict[str, dict]] = {}  # Track module.function signatures
@@ -147,7 +147,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                         assignments_seen.add(target.id)
         elif isinstance(node, ast.FunctionDef):
             # New scope
-            func_assignments = set()
+            func_assignments: set[str] = set()
             for stmt in node.body:
                 self._detect_reassignments(stmt, func_assignments)
         elif isinstance(node, ast.If):
@@ -176,13 +176,13 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
             self._collect_declarations(node)
 
         # Second pass: detect reassignments in main module
-        assignments_seen = set()
+        assignments_seen: set[str] = set()
         for node in parsed.ast_tree.body:
             self._detect_reassignments(node, assignments_seen)
 
         # Also detect reassignments in imported modules
         for module_name, module in self.imported_modules.items():
-            module_assignments_seen = set()
+            module_assignments_seen: set[str] = set()
             for node in module.ast_tree.body:
                 self._detect_reassignments(node, module_assignments_seen)
 
@@ -341,7 +341,8 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
 
             for func_name, func_sig in module_funcs.items():
                 func_node = func_sig["node"]
-                self.visit_FunctionDef(func_node)
+                if isinstance(func_node, ast.FunctionDef):
+                    self.visit_FunctionDef(func_node)
 
             # Remove module functions from function_signatures
             for func_name in module_funcs.keys():
@@ -1022,8 +1023,8 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                     target_vars.append(elt.id)
 
                 # Get all iterables
-                iterable_codes = []
-                iterable_names = []
+                iterable_codes: list[str] = []
+                iterable_names: list[str | None] = []
                 for arg in node.iter.args:
                     code, _ = self.visit_expr(arg)
                     iterable_codes.append(code)
@@ -1053,12 +1054,12 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                 self.indent_level += 1
 
                 # Get items from each list
-                for i, (target_var, iterable_code, iterable_name) in enumerate(zip(target_vars, iterable_codes, iterable_names)):
+                for i, (target_var, iterable_code, iterable_name) in enumerate(zip(target_vars, iterable_codes, iterable_names)):  # type: ignore[assignment]
                     self.emit(f"const {target_var} = try runtime.PyList.getItem({iterable_code}, @intCast({index_var}));")
                     self.declared_vars.add(target_var)
 
                     # Track variable type
-                    if iterable_name:
+                    if iterable_name is not None:
                         elem_type = self.list_element_types.get(iterable_name, "string")
                         if elem_type == "int":
                             self.var_types[target_var] = "pyint"
@@ -1129,7 +1130,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
             return
 
         # Parse exception handlers
-        handlers_info = []
+        handlers_info: list[tuple[str | None, list[ast.stmt], str | None]] = []
         for handler in node.handlers:
             if handler.type is None:
                 # Bare except: catches all errors
@@ -1147,12 +1148,12 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
         # Save current try context
         prev_in_try = getattr(self, '_in_try_block', False)
         prev_handlers = getattr(self, '_current_handlers', [])
-        prev_label = getattr(self, '_try_block_label', None)
+        prev_label: str | None = getattr(self, '_try_block_label', None)
 
         # Set new try context
         self._in_try_block = True
         self._current_handlers = handlers_info
-        self._try_block_label = block_label
+        self._try_block_label: str | None = block_label
 
         # Emit labeled block
         self.emit(f"{block_label}: {{")
@@ -1806,6 +1807,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                                         temp_prim_var = f"_temp_prim_{id(arg)}_{i}"
                                         self.emit(f"const {temp_prim_var} = try runtime.PyInt.create(allocator, {arg_code});")
                                         self.emit(f"defer runtime.decref({temp_prim_var}, allocator);")
+                                        # Method borrows this (may or may not return it)
                                         args.append(temp_prim_var)
                                     else:
                                         args.append(arg_code)
@@ -1817,6 +1819,12 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                             if method_info.return_type == ReturnType.PYOBJECT:
                                 self.emit(f"{var_keyword} {target.id} = try {runtime_call};")
                                 self.emit(f"defer runtime.decref({target.id}, allocator);")
+                            elif method_info.return_type == ReturnType.PYOBJECT_DIRECT:
+                                # PYOBJECT_DIRECT methods like dict.get() return owned references
+                                self.emit(f"{var_keyword} {target.id} = {runtime_call};")
+                                # dict.get() returns owned reference that needs decref
+                                if method_name == "get":
+                                    self.emit(f"defer runtime.decref({target.id}, allocator);")
                             else:
                                 self.emit(f"{var_keyword} {target.id} = {runtime_call};")
                         else:
@@ -2027,7 +2035,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
 
                 # Check if this is a dict subscript (returns PyObject but arg_try is False)
                 is_dict_subscript = False
-                if is_subscript and isinstance(arg.value, ast.Name):
+                if is_subscript and isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Name):
                     obj_type = self.var_types.get(arg.value.id)
                     is_dict_subscript = (obj_type == "dict")
 
@@ -2035,13 +2043,13 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                     # Determine the type to know how to print
                     arg_type = None
                     is_slice = False
-                    if is_subscript and isinstance(arg.value, ast.Name):
+                    if is_subscript and isinstance(arg, ast.Subscript) and isinstance(arg.value, ast.Name):
                         arg_type = self.var_types.get(arg.value.id)
                         is_slice = isinstance(arg.slice, ast.Slice)
-                    elif is_method_call and isinstance(arg.func, ast.Attribute) and isinstance(arg.func.value, ast.Name):
+                    elif is_method_call and isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute) and isinstance(arg.func.value, ast.Name):
                         obj_name = arg.func.value.id
                         arg_type = self.var_types.get(obj_name)
-                    elif is_attribute and isinstance(arg.value, ast.Name):
+                    elif is_attribute and isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name):
                         # Attribute access like dog.name
                         obj_name = arg.value.id
                         obj_type = self.var_types.get(obj_name)
@@ -2052,7 +2060,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                             field_type = class_info.fields.get(arg.attr)
                             if field_type == "*runtime.PyObject":
                                 arg_type = "string"  # Assume PyObject fields are strings for now
-                    elif is_pyobject_var:
+                    elif is_pyobject_var and isinstance(arg, ast.Name):
                         # PyObject variable like sound
                         arg_type = self.var_types.get(arg.id)
 

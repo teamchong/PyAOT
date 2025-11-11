@@ -5,7 +5,7 @@ Expression visitor - extracted from generator.py
 from __future__ import annotations
 
 import ast
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from core.parser import ParsedModule
@@ -15,17 +15,19 @@ if TYPE_CHECKING:
 class ExpressionVisitor:
     """Handles visit_expr and expression evaluation"""
 
-    # Provided by ZigCodeGenerator
+    # Provided by ZigCodeGenerator - using Any to avoid invariance issues with dict
     var_types: dict[str, str]
     declared_vars: set
     imported_modules: dict[str, ParsedModule]
-    class_definitions: dict[str, ClassInfo]
+    class_definitions: Any  # Actual type: dict[str, ClassInfo] but Any to avoid invariance
     function_signatures: dict[str, dict]
     module_functions: dict[str, dict[str, dict]]
 
     # Methods from other mixins
-    def visit_compare_op(self, op: ast.cmpop) -> str: ...
-    def visit_bin_op(self, op: ast.operator) -> str: ...
+    def visit_compare_op(self, op: ast.cmpop) -> str:
+        raise NotImplementedError("Provided by CodegenHelpers")
+    def visit_bin_op(self, op: ast.operator) -> str:
+        raise NotImplementedError("Provided by CodegenHelpers")
 
     def visit_expr(self, node: ast.AST) -> tuple[str, bool]:
         """Visit an expression node and return (code, needs_try) tuple"""
@@ -83,6 +85,15 @@ class ExpressionVisitor:
                 left_code = f"runtime.PyInt.getValue({left_code})"
             if right_is_pyint:
                 right_code = f"runtime.PyInt.getValue({right_code})"
+
+            # Special handling for floor division and power operators
+            if isinstance(node.op, ast.FloorDiv):
+                needs_try = left_try or right_try
+                return (f"@divFloor({left_code}, {right_code})", needs_try)
+            elif isinstance(node.op, ast.Pow):
+                needs_try = left_try or right_try
+                # Use std.math.pow with floats and cast back to int for simplicity
+                return (f"@as(i64, @intFromFloat(@floor(std.math.pow(f64, @floatFromInt({left_code}), @floatFromInt({right_code})))))", needs_try)
 
             op = self.visit_bin_op(node.op)
             needs_try = left_try or right_try
@@ -332,6 +343,14 @@ class ExpressionVisitor:
                     return (f"runtime.PyList.sum({arg_code})", False)
                 else:
                     return (f"sum({arg_code})", False)
+
+            elif func_name == "abs":
+                arg_code, _ = self.visit_expr(node.args[0])
+                return (f"@abs({arg_code})", False)
+
+            elif func_name == "round":
+                arg_code, _ = self.visit_expr(node.args[0])
+                return (f"@round({arg_code})", False)
 
             elif func_name == "range":
                 if len(node.args) == 1:

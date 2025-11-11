@@ -83,8 +83,15 @@ pub const PyDict = struct {
         std.debug.assert(obj.type_id == .dict);
         const data: *PyDict = @ptrCast(@alignCast(obj.data));
         _ = allocator;
-        // Returns borrowed reference - caller must incref if needed
-        return data.map.get(key) orelse default;
+        if (data.map.get(key)) |found| {
+            // Found in dict - incref and return (caller must decref)
+            runtime.incref(found);
+            return found;
+        } else {
+            // Not found - incref default before returning (caller must decref)
+            runtime.incref(default);
+            return default;
+        }
     }
 
     pub fn get_method(allocator: std.mem.Allocator, obj: *runtime.PyObject, key: *runtime.PyObject, default: *runtime.PyObject) *runtime.PyObject {
@@ -92,7 +99,7 @@ pub const PyDict = struct {
         std.debug.assert(key.type_id == .string);
         const key_data: *runtime.PyString = @ptrCast(@alignCast(key.data));
         const result = getWithDefault(allocator, obj, key_data.data, default);
-        runtime.decref(key, allocator); // Done with key PyObject, decref it
+        // Note: Don't decref key here - caller owns it and will decref via defer
         return result;
     }
 
