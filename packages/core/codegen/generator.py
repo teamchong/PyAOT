@@ -1580,10 +1580,10 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                     # Unknown subscript source, default to pyint
                     self.var_types[target.id] = "pyint"
 
-            # Special handling for list.pop() (track as pyint)
+            # Special handling for list.pop() and dict.pop() (returns PyObject, type unknown until runtime)
             if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute):
                 if node.value.func.attr == "pop":
-                    self.var_types[target.id] = "pyint"
+                    self.var_types[target.id] = "pyobject"
 
             # Special handling for dict literals
             if isinstance(node.value, ast.Dict):
@@ -1728,8 +1728,8 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                         # dict.keys(), dict.values(), dict.items() all return lists
                         self.var_types[target.id] = "list"
                     elif method_name == "pop":
-                        # pop() returns an element from the list (pyint for integer lists)
-                        self.var_types[target.id] = "pyint"
+                        # pop() returns PyObject with unknown type until runtime
+                        self.var_types[target.id] = "pyobject"
                     elif method_name == "copy":
                         # copy() returns same type as source
                         if obj_type == "dict":
@@ -1800,7 +1800,15 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                                 if arg_try:
                                     args.append(f"try {arg_code}")
                                 else:
-                                    args.append(arg_code)
+                                    # Wrap primitives in PyInt if method requires it (e.g., dict.get default param)
+                                    if hasattr(method_info, 'wrap_primitive_args') and method_info.wrap_primitive_args:
+                                        # Create temp PyInt for primitive argument
+                                        temp_prim_var = f"_temp_prim_{id(arg)}_{i}"
+                                        self.emit(f"const {temp_prim_var} = try runtime.PyInt.create(allocator, {arg_code});")
+                                        self.emit(f"defer runtime.decref({temp_prim_var}, allocator);")
+                                        args.append(temp_prim_var)
+                                    else:
+                                        args.append(arg_code)
 
                         runtime_call = f"runtime.{method_info.runtime_type}.{method_info.runtime_fn}({', '.join(args)})"
 
@@ -1866,7 +1874,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                                     self.emit(f"defer runtime.decref({target.id}, allocator);")
                                     # Track return type for print handling
                                     if return_type == "*runtime.PyObject":
-                                        self.var_types[target.id] = "string"  # Assume PyObject is string
+                                        self.var_types[target.id] = "pyobject"  # Runtime type check needed
                             else:
                                 self.emit(f"{var_keyword} {target.id} = {func_call};")
                         else:
@@ -1892,7 +1900,11 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                 # Method call - check if it returns PyObject
                 if needs_try:
                     # Method returns PyObject (or error union)
-                    self.var_types[target.id] = "string"  # Assume PyObject methods return strings
+                    # Only set if not already determined (e.g., pop() sets to "pyobject", keys() sets to "list")
+                    existing_type = self.var_types.get(target.id)
+                    # Don't overwrite specific types that were already determined above
+                    if existing_type not in ["list", "dict", "pyobject", "pyint"]:
+                        self.var_types[target.id] = "string"  # Assume PyObject methods return strings
 
             if is_first_assignment:
                 if needs_try:
@@ -2011,7 +2023,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                 is_method_call = isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute)
                 is_subscript = isinstance(arg, ast.Subscript)
                 is_attribute = isinstance(arg, ast.Attribute)
-                is_pyobject_var = isinstance(arg, ast.Name) and self.var_types.get(arg.id) in ["string", "list", "dict"]
+                is_pyobject_var = isinstance(arg, ast.Name) and self.var_types.get(arg.id) in ["string", "list", "dict", "pyobject"]
 
                 # Check if this is a dict subscript (returns PyObject but arg_try is False)
                 is_dict_subscript = False
@@ -2072,6 +2084,15 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                         self.emit(f"}}")
                     elif arg_type == "tuple" and not is_slice:
                         # Tuple subscript returns PyObject - need to check type at runtime
+                        self.emit(f"if ({temp_var}.type_id == .string) {{")
+                        self.emit(f'    _ = std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({temp_var})}});')
+                        self.emit(f"}} else if ({temp_var}.type_id == .int) {{")
+                        self.emit(f'    _ = std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({temp_var})}});')
+                        self.emit(f"}} else {{")
+                        self.emit(f'    _ = std.debug.print("{{}}\\n", .{{{temp_var}}});')
+                        self.emit(f"}}")
+                    elif arg_type == "pyobject":
+                        # PyObject variable (like from list.pop()) - need to check type at runtime
                         self.emit(f"if ({temp_var}.type_id == .string) {{")
                         self.emit(f'    _ = std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({temp_var})}});')
                         self.emit(f"}} else if ({temp_var}.type_id == .int) {{")
