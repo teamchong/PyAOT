@@ -17,4 +17,4 @@ class Tensor:
 
     def reshape(self, shape: tuple) -> "Tensor":
         """Reshape tensor"""
-        ...
+        raise NotImplementedError("ai.Tensor.reshape not yet implemented")

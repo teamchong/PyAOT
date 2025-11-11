@@ -13,8 +13,8 @@ class HttpClient:
 
     def get(self, url: str) -> dict:
         """HTTP GET request"""
-        ...
+        raise NotImplementedError("http.HttpClient.get not yet implemented")
 
     def post(self, url: str, data: dict) -> dict:
         """HTTP POST request"""
-        ...
+        raise NotImplementedError("http.HttpClient.post not yet implemented")

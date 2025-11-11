@@ -8,7 +8,7 @@ import ast
 class CodegenHelpers:
     """Mixin class with helper methods for code generation"""
 
-    def visit_compare_op(self, op: ast.AST) -> str:
+    def visit_compare_op(self, op: ast.cmpop) -> str:
         """Convert comparison operator"""
         op_map = {
             ast.Lt: "<",
@@ -20,7 +20,7 @@ class CodegenHelpers:
         }
         return op_map.get(type(op), "==")
 
-    def visit_bin_op(self, op: ast.AST) -> str:
+    def visit_bin_op(self, op: ast.operator) -> str:
         """Convert binary operator"""
         op_map = {
             ast.Add: "+",

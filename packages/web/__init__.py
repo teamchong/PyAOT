@@ -25,7 +25,7 @@ class Response:
     @staticmethod
     def json(data: dict) -> "Response":
         """Create JSON response"""
-        ...
+        raise NotImplementedError("web.Response.json not yet implemented")
 
 
 class App:
