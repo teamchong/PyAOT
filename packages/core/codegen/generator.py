@@ -1067,6 +1067,36 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
     def visit_Return(self, node: ast.Return) -> None:
         """Generate return statement"""
         if node.value:
+            # Special handling for string concatenation with inline constants
+            if isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Add):
+                # Check if either operand is a string constant
+                temp_vars = []
+                if isinstance(node.value.left, ast.Constant) and isinstance(node.value.left.value, str):
+                    temp_var = f"_temp_ret_{id(node.value.left)}"
+                    self.emit(f"const {temp_var} = try runtime.PyString.create(allocator, \"{node.value.left.value}\");")
+                    self.emit(f"defer runtime.decref({temp_var}, allocator);")
+                    temp_vars.append(('left', temp_var))
+                if isinstance(node.value.right, ast.Constant) and isinstance(node.value.right.value, str):
+                    temp_var = f"_temp_ret_{id(node.value.right)}"
+                    self.emit(f"const {temp_var} = try runtime.PyString.create(allocator, \"{node.value.right.value}\");")
+                    self.emit(f"defer runtime.decref({temp_var}, allocator);")
+                    temp_vars.append(('right', temp_var))
+
+                if temp_vars:
+                    # Build concat with temp vars
+                    left_code, _ = self.visit_expr(node.value.left) if 'left' not in [v[0] for v in temp_vars] else (temp_vars[0][1], False)
+                    right_code, _ = self.visit_expr(node.value.right) if 'right' not in [v[0] for v in temp_vars] else (temp_vars[1][1] if len(temp_vars) > 1 else temp_vars[0][1], False)
+
+                    # Replace with actual temp var if we created one
+                    for side, var in temp_vars:
+                        if side == 'left':
+                            left_code = var
+                        else:
+                            right_code = var
+
+                    self.emit(f"return try runtime.PyString.concat(allocator, {left_code}, {right_code});")
+                    return
+
             value_code, value_try = self.visit_expr(node.value)
             if value_try:
                 self.emit(f"return try {value_code};")
@@ -1686,6 +1716,125 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                         if obj_type:
                             self.var_types[target.id] = obj_type
 
+            # Special handling for method calls with string arguments that need cleanup
+            if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute):
+                method_name = node.value.func.attr
+
+                # Check if any arguments are string constants (will create temporary PyStrings)
+                temp_args = []
+                for i, arg in enumerate(node.value.args):
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        # This will create a temporary PyString that needs to be freed
+                        temp_var = f"_temp_arg_{id(arg)}"
+                        self.emit(f"const {temp_var} = try runtime.PyString.create(allocator, \"{arg.value}\");")
+                        self.emit(f"defer runtime.decref({temp_var}, allocator);")
+                        temp_args.append((i, temp_var))
+
+                # If we have temp args, generate the method call with them
+                if temp_args:
+                    obj_code, obj_try = self.visit_expr(node.value.func.value)
+
+                    from core.method_registry import get_method_info, ReturnType
+                    obj_type = None
+                    if isinstance(node.value.func.value, ast.Name):
+                        obj_type = self.var_types.get(node.value.func.value.id)
+
+                    method_info = get_method_info(method_name, obj_type)
+
+                    if method_info:
+                        args = []
+                        if method_info.needs_allocator:
+                            args.append("allocator")
+                        args.append(obj_code)
+
+                        # Add arguments, using temp vars where we created them
+                        temp_arg_dict = dict(temp_args)
+                        for i, arg in enumerate(node.value.args):
+                            if i in temp_arg_dict:
+                                args.append(temp_arg_dict[i])
+                            else:
+                                arg_code, arg_try = self.visit_expr(arg)
+                                if arg_try:
+                                    args.append(f"try {arg_code}")
+                                else:
+                                    args.append(arg_code)
+
+                        runtime_call = f"runtime.{method_info.runtime_type}.{method_info.runtime_fn}({', '.join(args)})"
+
+                        # Generate assignment
+                        if is_first_assignment:
+                            if method_info.return_type == ReturnType.PYOBJECT:
+                                self.emit(f"{var_keyword} {target.id} = try {runtime_call};")
+                                self.emit(f"defer runtime.decref({target.id}, allocator);")
+                            else:
+                                self.emit(f"{var_keyword} {target.id} = {runtime_call};")
+                        else:
+                            # Reassignment
+                            var_type = self.var_types.get(target.id)
+                            is_pyobject = var_type in ["string", "list", "dict", "pyint"]
+                            if is_pyobject:
+                                self.emit(f"runtime.decref({target.id}, allocator);")
+                            if method_info.return_type == ReturnType.PYOBJECT:
+                                self.emit(f"{target.id} = try {runtime_call};")
+                            else:
+                                self.emit(f"{target.id} = {runtime_call};")
+                        return
+
+            # Special handling for user-defined function calls with string arguments
+            if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name):
+                func_name = node.value.func.id
+                if func_name in self.function_signatures:
+                    # Check if any arguments are string constants
+                    temp_args = []
+                    for i, arg in enumerate(node.value.args):
+                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                            temp_var = f"_temp_arg_{id(arg)}"
+                            self.emit(f"const {temp_var} = try runtime.PyString.create(allocator, \"{arg.value}\");")
+                            self.emit(f"defer runtime.decref({temp_var}, allocator);")
+                            temp_args.append((i, temp_var))
+
+                    if temp_args:
+                        # Build function call with temp vars
+                        sig = self.function_signatures[func_name]
+                        args = []
+                        if sig["needs_allocator"]:
+                            args.append("allocator")
+
+                        temp_arg_dict = dict(temp_args)
+                        for i, arg in enumerate(node.value.args):
+                            if i in temp_arg_dict:
+                                args.append(temp_arg_dict[i])
+                            else:
+                                arg_code, arg_try = self.visit_expr(arg)
+                                if arg_try:
+                                    args.append(f"try {arg_code}")
+                                else:
+                                    args.append(arg_code)
+
+                        return_type = sig.get("return_type", "")
+                        needs_try = sig.get("returns_pyobject", False) or (isinstance(return_type, str) and return_type.startswith("!"))
+                        func_call = f"{func_name}({', '.join(args)})"
+
+                        if is_first_assignment:
+                            if needs_try:
+                                self.emit(f"{var_keyword} {target.id} = try {func_call};")
+                                # Check if return is PyObject that needs decref
+                                if sig.get("returns_pyobject", False):
+                                    self.emit(f"defer runtime.decref({target.id}, allocator);")
+                            else:
+                                self.emit(f"{var_keyword} {target.id} = {func_call};")
+                        else:
+                            # Reassignment
+                            var_type = self.var_types.get(target.id)
+                            is_pyobject = var_type in ["string", "list", "dict", "pyint"]
+                            if is_pyobject:
+                                self.emit(f"runtime.decref({target.id}, allocator);")
+                            if needs_try:
+                                self.emit(f"{target.id} = try {func_call};")
+                            else:
+                                self.emit(f"{target.id} = {func_call};")
+                        return
+
             # Default path
             value_code, needs_try = self.visit_expr(node.value)
 
@@ -1815,24 +1964,55 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                 is_method_call = isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute)
                 is_subscript = isinstance(arg, ast.Subscript)
 
-                if arg_try and (is_method_call or is_subscript):
+                # Check if this is a dict subscript (returns PyObject but arg_try is False)
+                is_dict_subscript = False
+                if is_subscript and isinstance(arg.value, ast.Name):
+                    obj_type = self.var_types.get(arg.value.id)
+                    is_dict_subscript = (obj_type == "dict")
+
+                if (arg_try and (is_method_call or is_subscript)) or is_dict_subscript:
                     # Determine the type to know how to print
                     arg_type = None
                     is_slice = False
                     if is_subscript and isinstance(arg.value, ast.Name):
                         arg_type = self.var_types.get(arg.value.id)
                         is_slice = isinstance(arg.slice, ast.Slice)
-                    elif is_method_call and isinstance(arg.func.value, ast.Name):
+                    elif is_method_call and isinstance(arg.func, ast.Attribute) and isinstance(arg.func.value, ast.Name):
                         obj_name = arg.func.value.id
                         arg_type = self.var_types.get(obj_name)
 
                     # Extract to temp variable
                     temp_var = f"_temp_print_{id(node)}"
-                    self.emit(f"const {temp_var} = try {arg_code};")
-                    self.emit(f"defer runtime.decref({temp_var}, allocator);")
+                    # Dict subscripts don't need try, they return optional
+                    if is_dict_subscript:
+                        self.emit(f"const {temp_var} = {arg_code};")
+                    else:
+                        self.emit(f"const {temp_var} = try {arg_code};")
+                    # Only defer decref for method calls or slices (which create new PyObjects)
+                    # Single element subscripts return borrowed references, don't decref them
+                    if is_method_call or is_slice:
+                        self.emit(f"defer runtime.decref({temp_var}, allocator);")
 
                     # Print based on type
-                    if arg_type == "string" and not is_slice:
+                    if arg_type == "dict" and not is_slice:
+                        # Dict subscript returns PyObject - need to check type at runtime
+                        self.emit(f"if ({temp_var}.type_id == .string) {{")
+                        self.emit(f'    _ = std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({temp_var})}});')
+                        self.emit(f"}} else if ({temp_var}.type_id == .int) {{")
+                        self.emit(f'    _ = std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({temp_var})}});')
+                        self.emit(f"}} else {{")
+                        self.emit(f'    _ = std.debug.print("{{}}\\n", .{{{temp_var}}});')
+                        self.emit(f"}}")
+                    elif arg_type == "tuple" and not is_slice:
+                        # Tuple subscript returns PyObject - need to check type at runtime
+                        self.emit(f"if ({temp_var}.type_id == .string) {{")
+                        self.emit(f'    _ = std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({temp_var})}});')
+                        self.emit(f"}} else if ({temp_var}.type_id == .int) {{")
+                        self.emit(f'    _ = std.debug.print("{{}}\\n", .{{runtime.PyInt.getValue({temp_var})}});')
+                        self.emit(f"}} else {{")
+                        self.emit(f'    _ = std.debug.print("{{}}\\n", .{{{temp_var}}});')
+                        self.emit(f"}}")
+                    elif arg_type == "string" and not is_slice:
                         # String methods or single char subscript return PyString
                         self.emit(f'_ = std.debug.print("{{s}}\\n", .{{runtime.PyString.getValue({temp_var})}});')
                     elif is_slice and (arg_type == "list" or arg_type == "tuple"):

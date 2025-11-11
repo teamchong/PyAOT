@@ -229,6 +229,7 @@ pub const PyString = struct {
             for (str) |c| {
                 const char_obj = try create(allocator, &[_]u8{c});
                 try PyList.append(result, char_obj);
+                decref(char_obj, allocator); // append increfs, so decref to transfer ownership
             }
             return result;
         }
@@ -242,6 +243,7 @@ pub const PyString = struct {
                 const part = str[start..i];
                 const part_obj = try create(allocator, part);
                 try PyList.append(result, part_obj);
+                decref(part_obj, allocator); // append increfs, so decref to transfer ownership
                 i += sep.len;
                 start = i;
             } else {
@@ -253,6 +255,7 @@ pub const PyString = struct {
         const final_part = str[start..];
         const final_obj = try create(allocator, final_part);
         try PyList.append(result, final_obj);
+        decref(final_obj, allocator); // append increfs, so decref to transfer ownership
 
         return result;
     }
@@ -325,7 +328,9 @@ pub const PyString = struct {
             }
         }
 
-        return try create(allocator, result);
+        const result_obj = try create(allocator, result);
+        allocator.free(result); // Free temporary buffer after PyString duplicates it
+        return result_obj;
     }
 
     pub fn startswith(obj: *PyObject, prefix: *PyObject) bool {

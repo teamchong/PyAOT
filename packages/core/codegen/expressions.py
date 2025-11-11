@@ -164,7 +164,7 @@ class ExpressionVisitor:
             elif isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
                 # Dict access with string literal key - returns PyObject
                 key_str = node.slice.value
-                return (f'runtime.PyDict.get({obj_code}, "{key_str}").?', True)
+                return (f'runtime.PyDict.get({obj_code}, "{key_str}").?', False)
             else:
                 index_code, index_try = self.visit_expr(node.slice)
 
@@ -374,7 +374,9 @@ class ExpressionVisitor:
                     sig = self.function_signatures[func_name]
                     if sig["needs_allocator"]:
                         args.append("allocator")
-                    needs_try = sig.get("returns_pyobject", False)
+                    # Function needs try if it returns PyObject OR error union (starts with !)
+                    return_type = sig.get("return_type", "")
+                    needs_try = sig.get("returns_pyobject", False) or (isinstance(return_type, str) and return_type.startswith("!"))
 
                 for arg in node.args:
                     arg_code, arg_try = self.visit_expr(arg)
@@ -416,9 +418,10 @@ class ExpressionVisitor:
 
             if method_info:
                 args = []
+                # Object comes first, then allocator (matches runtime signatures)
+                args.append(obj_code)
                 if method_info.needs_allocator:
                     args.append("allocator")
-                args.append(obj_code)
 
                 # Track method arguments separately for VOID methods (statement methods)
                 method_args = []
@@ -428,7 +431,11 @@ class ExpressionVisitor:
                     if arg_try:
                         args.append(f"try {arg_code}")
                     else:
-                        args.append(arg_code)
+                        # Wrap primitives in PyInt if method requires it
+                        if hasattr(method_info, 'wrap_primitive_args') and method_info.wrap_primitive_args:
+                            args.append(f"__WRAP_PRIMITIVE__{arg_code}")
+                        else:
+                            args.append(arg_code)
 
                 runtime_call = f"runtime.{method_info.runtime_type}.{method_info.runtime_fn}({', '.join(args)})"
 
