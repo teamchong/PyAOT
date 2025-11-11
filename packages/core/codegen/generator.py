@@ -356,7 +356,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
             if top_level_needs_allocator:
                 self.emit("pub fn main() !void {")
                 self.indent_level += 1
-                self.emit("var gpa = std.heap.GeneralPurposeAllocator(.{}){};")
+                self.emit("var gpa = std.heap.GeneralPurposeAllocator(.{ .verbose_log = false }){};")
                 self.emit("defer _ = gpa.deinit();")
                 self.emit("const allocator = gpa.allocator();")
                 self.emit("")
@@ -705,8 +705,11 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
         self.emit(f"pub fn deinit(self: *{class_name}, allocator: std.mem.Allocator) void {{")
         self.indent_level += 1
 
-        # TODO: Add cleanup for PyObject fields if needed
-        # For now, just destroy the instance
+        # Decref PyObject fields before destroying instance
+        for field_name, field_type in fields.items():
+            if field_type == "*runtime.PyObject":
+                self.emit(f"runtime.decref(self.{field_name}, allocator);")
+
         self.emit("allocator.destroy(self);")
 
         self.indent_level -= 1
@@ -853,6 +856,18 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                     test_code = f"runtime.PyList.contains({right_code}, {temp_var})"
                 else:
                     test_code = f"runtime.PyList.contains({right_code}, {left_code})"
+
+        # Handle inline PyString.create in method calls like startswith/endswith
+        # Extract them into temp variables to avoid memory leaks
+        import re
+        create_pattern = r'try runtime\.PyString\.create\(allocator, "([^"]+)"\)'
+        if re.search(create_pattern, test_code):
+            matches = list(re.finditer(create_pattern, test_code))
+            for i, match in enumerate(matches):
+                temp_var = f"_if_temp_str_{id(node)}_{i}"
+                self.emit(f'const {temp_var} = try runtime.PyString.create(allocator, "{match.group(1)}");')
+                self.emit(f"defer runtime.decref({temp_var}, allocator);")
+                test_code = test_code.replace(match.group(0), temp_var)
 
         self.emit(f"if ({test_code}) {{")
         self.indent_level += 1
@@ -1849,6 +1864,9 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                                 # Check if return is PyObject that needs decref
                                 if sig.get("returns_pyobject", False):
                                     self.emit(f"defer runtime.decref({target.id}, allocator);")
+                                    # Track return type for print handling
+                                    if return_type == "*runtime.PyObject":
+                                        self.var_types[target.id] = "string"  # Assume PyObject is string
                             else:
                                 self.emit(f"{var_keyword} {target.id} = {func_call};")
                         else:
@@ -1869,6 +1887,13 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
             # Unwrap any __WRAP_PRIMITIVE__ markers
             value_code = self._unwrap_primitive_markers(value_code, id(node))
 
+            # Check if this is a method call that returns PyObject
+            if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute):
+                # Method call - check if it returns PyObject
+                if needs_try:
+                    # Method returns PyObject (or error union)
+                    self.var_types[target.id] = "string"  # Assume PyObject methods return strings
+
             if is_first_assignment:
                 if needs_try:
                     # Emit assignment with error handling
@@ -1877,13 +1902,11 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                     else:
                         self.emit(f"{var_keyword} {target.id} = try {value_code};")
 
-                    # If assigning a parameter, incref it and defer decref the param
+                    # If assigning a parameter, incref it (param is owned by caller)
                     var_type = self.var_types.get(target.id)
                     is_pyobject = var_type in ["string", "list", "dict", "pyint"]
                     if is_pyobject and isinstance(node.value, ast.Name) and node.value.id in self.function_params:
-                        param_name = node.value.id
                         self.emit(f"runtime.incref({target.id});")
-                        self.emit(f"defer runtime.decref({param_name}, allocator);")
 
                     # Check if it's a class instance (needs deinit) or PyObject (needs decref)
                     # IMPORTANT: Index subscripts (list[i], dict[key]) return borrowed references
@@ -1928,12 +1951,10 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                             type_annotation = "i64"
                         self.emit(f"{var_keyword} {target.id}: {type_annotation} = {value_code};")
 
-                        # If assigning a parameter, incref it and defer decref the param
+                        # If assigning a parameter, incref it (param is owned by caller)
                         is_pyobject = var_type in ["string", "list", "dict", "pyint"]
                         if is_pyobject and isinstance(node.value, ast.Name) and node.value.id in self.function_params:
-                            param_name = node.value.id
                             self.emit(f"runtime.incref({target.id});")
-                            self.emit(f"defer runtime.decref({param_name}, allocator);")
                     else:
                         self.emit(f"{var_keyword} {target.id} = {value_code};")
             else:
@@ -1986,9 +2007,11 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                 arg = node.value.args[0]
                 arg_code, arg_try = self.visit_expr(arg)
 
-                # Detect if this is a PyObject-returning expression (method call or subscript)
+                # Detect if this is a PyObject-returning expression (method call, subscript, attribute, or pyobject variable)
                 is_method_call = isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute)
                 is_subscript = isinstance(arg, ast.Subscript)
+                is_attribute = isinstance(arg, ast.Attribute)
+                is_pyobject_var = isinstance(arg, ast.Name) and self.var_types.get(arg.id) in ["string", "list", "dict"]
 
                 # Check if this is a dict subscript (returns PyObject but arg_try is False)
                 is_dict_subscript = False
@@ -1996,7 +2019,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                     obj_type = self.var_types.get(arg.value.id)
                     is_dict_subscript = (obj_type == "dict")
 
-                if (arg_try and (is_method_call or is_subscript)) or is_dict_subscript:
+                if (arg_try and (is_method_call or is_subscript)) or is_dict_subscript or is_attribute or is_pyobject_var:
                     # Determine the type to know how to print
                     arg_type = None
                     is_slice = False
@@ -2006,11 +2029,25 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                     elif is_method_call and isinstance(arg.func, ast.Attribute) and isinstance(arg.func.value, ast.Name):
                         obj_name = arg.func.value.id
                         arg_type = self.var_types.get(obj_name)
+                    elif is_attribute and isinstance(arg.value, ast.Name):
+                        # Attribute access like dog.name
+                        obj_name = arg.value.id
+                        obj_type = self.var_types.get(obj_name)
+                        # Check if it's a class instance
+                        if obj_type and obj_type in self.class_definitions:
+                            # Look up the field type in the class definition
+                            class_info = self.class_definitions[obj_type]
+                            field_type = class_info.fields.get(arg.attr)
+                            if field_type == "*runtime.PyObject":
+                                arg_type = "string"  # Assume PyObject fields are strings for now
+                    elif is_pyobject_var:
+                        # PyObject variable like sound
+                        arg_type = self.var_types.get(arg.id)
 
                     # Extract to temp variable
                     temp_var = f"_temp_print_{id(node)}"
-                    # Dict subscripts don't need try, they return optional
-                    if is_dict_subscript:
+                    # Dict subscripts, attributes, and pyobject variables don't need try
+                    if is_dict_subscript or is_attribute or is_pyobject_var:
                         self.emit(f"const {temp_var} = {arg_code};")
                     else:
                         # Emit with error handling
@@ -2019,7 +2056,7 @@ class ZigCodeGenerator(CodegenHelpers, ExpressionVisitor):
                         else:
                             self.emit(f"const {temp_var} = try {arg_code};")
                     # Only defer decref for method calls or slices (which create new PyObjects)
-                    # Single element subscripts return borrowed references, don't decref them
+                    # Attributes, pyobject variables, and single element subscripts return borrowed references, don't decref them
                     if is_method_call or is_slice:
                         self.emit(f"defer runtime.decref({temp_var}, allocator);")
 
