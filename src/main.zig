@@ -61,7 +61,8 @@ fn compileFile(allocator: std.mem.Allocator, input_path: []const u8, output_path
     // PHASE 2: Parser - Build AST
     std.debug.print("Parsing...\n", .{});
     var p = parser.Parser.init(allocator, tokens);
-    const tree = try p.parse();
+    var tree = try p.parse();
+    defer tree.deinit(allocator);
 
     // PHASE 3: Codegen - Generate Zig code
     std.debug.print("Generating Zig code...\n", .{});

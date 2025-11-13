@@ -137,6 +137,134 @@ pub const Node = union(enum) {
     pub const ExprStmt = struct {
         value: *Node,
     };
+
+    /// Recursively free all allocations in the AST
+    pub fn deinit(self: *const Node, allocator: std.mem.Allocator) void {
+        switch (self.*) {
+            .module => |m| {
+                for (m.body) |*node| node.deinit(allocator);
+                allocator.free(m.body);
+            },
+            .assign => |a| {
+                for (a.targets) |*t| t.deinit(allocator);
+                allocator.free(a.targets);
+                a.value.deinit(allocator);
+                allocator.destroy(a.value);
+            },
+            .binop => |b| {
+                b.left.deinit(allocator);
+                allocator.destroy(b.left);
+                b.right.deinit(allocator);
+                allocator.destroy(b.right);
+            },
+            .unaryop => |u| {
+                u.operand.deinit(allocator);
+                allocator.destroy(u.operand);
+            },
+            .compare => |c| {
+                c.left.deinit(allocator);
+                allocator.destroy(c.left);
+                allocator.free(c.ops);
+                for (c.comparators) |*comp| comp.deinit(allocator);
+                allocator.free(c.comparators);
+            },
+            .boolop => |b| {
+                for (b.values) |*v| v.deinit(allocator);
+                allocator.free(b.values);
+            },
+            .call => |c| {
+                c.func.deinit(allocator);
+                allocator.destroy(c.func);
+                for (c.args) |*a| a.deinit(allocator);
+                allocator.free(c.args);
+            },
+            .if_stmt => |i| {
+                i.condition.deinit(allocator);
+                allocator.destroy(i.condition);
+                for (i.body) |*n| n.deinit(allocator);
+                allocator.free(i.body);
+                for (i.else_body) |*n| n.deinit(allocator);
+                allocator.free(i.else_body);
+            },
+            .for_stmt => |f| {
+                f.target.deinit(allocator);
+                allocator.destroy(f.target);
+                f.iter.deinit(allocator);
+                allocator.destroy(f.iter);
+                for (f.body) |*n| n.deinit(allocator);
+                allocator.free(f.body);
+            },
+            .while_stmt => |w| {
+                w.condition.deinit(allocator);
+                allocator.destroy(w.condition);
+                for (w.body) |*n| n.deinit(allocator);
+                allocator.free(w.body);
+            },
+            .function_def => |f| {
+                allocator.free(f.args);
+                for (f.body) |*n| n.deinit(allocator);
+                allocator.free(f.body);
+            },
+            .class_def => |c| {
+                for (c.body) |*n| n.deinit(allocator);
+                allocator.free(c.body);
+            },
+            .return_stmt => |r| {
+                if (r.value) |v| {
+                    v.deinit(allocator);
+                    allocator.destroy(v);
+                }
+            },
+            .list => |l| {
+                for (l.elts) |*e| e.deinit(allocator);
+                allocator.free(l.elts);
+            },
+            .dict => |d| {
+                for (d.keys) |*k| k.deinit(allocator);
+                allocator.free(d.keys);
+                for (d.values) |*v| v.deinit(allocator);
+                allocator.free(d.values);
+            },
+            .tuple => |t| {
+                for (t.elts) |*e| e.deinit(allocator);
+                allocator.free(t.elts);
+            },
+            .subscript => |s| {
+                s.value.deinit(allocator);
+                allocator.destroy(s.value);
+                switch (s.slice) {
+                    .index => |idx| {
+                        idx.deinit(allocator);
+                        allocator.destroy(idx);
+                    },
+                    .slice => |sl| {
+                        if (sl.lower) |l| {
+                            l.deinit(allocator);
+                            allocator.destroy(l);
+                        }
+                        if (sl.upper) |u| {
+                            u.deinit(allocator);
+                            allocator.destroy(u);
+                        }
+                        if (sl.step) |st| {
+                            st.deinit(allocator);
+                            allocator.destroy(st);
+                        }
+                    },
+                }
+            },
+            .attribute => |a| {
+                a.value.deinit(allocator);
+                allocator.destroy(a.value);
+            },
+            .expr_stmt => |e| {
+                e.value.deinit(allocator);
+                allocator.destroy(e.value);
+            },
+            // Leaf nodes need no cleanup
+            .name, .constant => {},
+        }
+    }
 };
 
 pub const Operator = enum {
