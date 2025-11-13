@@ -44,6 +44,10 @@ pub fn incref(obj: *PyObject) void {
 }
 
 pub fn decref(obj: *PyObject, allocator: std.mem.Allocator) void {
+    if (obj.ref_count == 0) {
+        std.debug.print("WARNING: Attempting to decref object with ref_count already 0\n", .{});
+        return;
+    }
     obj.ref_count -= 1;
     if (obj.ref_count == 0) {
         // Free internal data based on type

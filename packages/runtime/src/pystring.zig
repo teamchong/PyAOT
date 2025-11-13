@@ -276,7 +276,7 @@ pub const PyString = struct {
             for (str) |c| {
                 const char_obj = try create(allocator, &[_]u8{c});
                 try PyList.append(result, char_obj);
-                decref(char_obj, allocator); // append increfs, so decref to transfer ownership
+                // append transfers ownership (no incref), so don't decref
             }
             return result;
         }
@@ -290,7 +290,7 @@ pub const PyString = struct {
                 const part = str[start..i];
                 const part_obj = try create(allocator, part);
                 try PyList.append(result, part_obj);
-                decref(part_obj, allocator); // append increfs, so decref to transfer ownership
+                // append transfers ownership (no incref), so don't decref
                 i += sep.len;
                 start = i;
             } else {
@@ -302,7 +302,7 @@ pub const PyString = struct {
         const final_part = str[start..];
         const final_obj = try create(allocator, final_part);
         try PyList.append(result, final_obj);
-        decref(final_obj, allocator); // append increfs, so decref to transfer ownership
+        // append transfers ownership (no incref), so don't decref
 
         return result;
     }

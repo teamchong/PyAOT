@@ -159,6 +159,10 @@ fn visitAssign(self: *ZigCodeGenerator, assign: ast.Node.Assign) CodegenError!vo
                         else => {},
                     }
                 },
+                .subscript => {
+                    // Subscript returns PyObject - needs runtime type detection when printing
+                    try self.var_types.put(var_name, "pyobject");
+                },
                 else => {},
             }
 

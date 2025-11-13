@@ -30,8 +30,9 @@ pub fn visitPrintCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Ex
                     try print_buf.writer(self.temp_allocator).print(
                         "if ({s}.type_id == .int) {{ std.debug.print(\"{{}}\\n\", .{{runtime.PyInt.getValue({s})}}); }} " ++
                         "else if ({s}.type_id == .string) {{ std.debug.print(\"{{s}}\\n\", .{{runtime.PyString.getValue({s})}}); }} " ++
+                        "else if ({s}.type_id == .list) {{ runtime.printList({s}); std.debug.print(\"\\n\", .{{}}); }} " ++
                         "else {{ std.debug.print(\"{{any}}\\n\", .{{{s}}}); }}",
-                        .{ name.id, name.id, name.id, name.id, name.id }
+                        .{ name.id, name.id, name.id, name.id, name.id, name.id, name.id }
                     );
                     try self.emitOwned(try print_buf.toOwnedSlice(self.temp_allocator));
                     // Return empty code since we already emitted the statement
@@ -72,9 +73,10 @@ pub fn visitPrintCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!Ex
                 "switch ({s}.type_id) {{ " ++
                 ".int => std.debug.print(\"{{}}\\n\", .{{runtime.PyInt.getValue({s})}}), " ++
                 ".string => std.debug.print(\"{{s}}\\n\", .{{runtime.PyString.getValue({s})}}), " ++
+                ".list => {{ runtime.printList({s}); std.debug.print(\"\\n\", .{{}}); }}, " ++
                 "else => std.debug.print(\"{{any}}\\n\", .{{{s}}}), " ++
                 "}} }}",
-                .{temp_var, unwrap, arg_result.code, temp_var, temp_var, temp_var, temp_var}
+                .{temp_var, unwrap, arg_result.code, temp_var, temp_var, temp_var, temp_var, temp_var}
             );
             try self.emitOwned(try print_buf.toOwnedSlice(self.temp_allocator));
             return ExprResult{

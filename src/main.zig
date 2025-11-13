@@ -75,13 +75,9 @@ fn compileFile(allocator: std.mem.Allocator, input_path: []const u8, output_path
     if (!should_compile) {
         // Binary is up-to-date, skip compilation
         if (std.mem.eql(u8, mode, "run")) {
-            // Just run the existing binary
-            const result = try std.process.Child.run(.{
-                .allocator = allocator,
-                .argv = &[_][]const u8{bin_path},
-            });
-            defer allocator.free(result.stdout);
-            defer allocator.free(result.stderr);
+            // Just run the existing binary (inherit stdout/stderr)
+            var child = std.process.Child.init(&[_][]const u8{bin_path}, allocator);
+            _ = try child.spawnAndWait();
         } else {
             std.debug.print("✓ Binary up-to-date: {s}\n", .{bin_path});
         }
@@ -119,13 +115,9 @@ fn compileFile(allocator: std.mem.Allocator, input_path: []const u8, output_path
     // Run if mode is "run"
     if (std.mem.eql(u8, mode, "run")) {
         std.debug.print("\n", .{});
-        const result = try std.process.Child.run(.{
-            .allocator = allocator,
-            .argv = &[_][]const u8{bin_path},
-        });
-        // Free stdout/stderr from subprocess
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
+        // Run binary with inherited stdout/stderr
+        var child = std.process.Child.init(&[_][]const u8{bin_path}, allocator);
+        _ = try child.spawnAndWait();
     }
 }
 

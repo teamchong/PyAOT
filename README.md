@@ -68,7 +68,7 @@ zyth examples/fibonacci.py
 
 # Or build without running
 zyth build examples/fibonacci.py
-./bin/fibonacci
+./.zyth/fibonacci
 # Output: 55
 ```
 
