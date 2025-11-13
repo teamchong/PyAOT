@@ -146,6 +146,21 @@ class ExpressionVisitor:
             if right_is_pyint:
                 right_code = f"runtime.PyInt.getValue({right_code})"
 
+            # Also unwrap method calls that return PyObjects (like pop(), getItem())
+            # These return error unions, so we need to use 'try'
+            if right_try and isinstance(node.right, ast.Call):
+                if isinstance(node.right.func, ast.Attribute):
+                    method_name = node.right.func.attr
+                    # Methods like pop() and getItem() return PyObject containing ints
+                    if method_name in ("pop", "getItem"):
+                        right_code = f"runtime.PyInt.getValue(try {right_code})"
+
+            if left_try and isinstance(node.left, ast.Call):
+                if isinstance(node.left.func, ast.Attribute):
+                    method_name = node.left.func.attr
+                    if method_name in ("pop", "getItem"):
+                        left_code = f"runtime.PyInt.getValue(try {left_code})"
+
             # Special handling for floor division and power operators
             if isinstance(node.op, ast.FloorDiv):
                 needs_try = left_try or right_try
