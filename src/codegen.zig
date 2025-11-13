@@ -201,7 +201,15 @@ pub const ZigCodeGenerator = struct {
                 self.needs_allocator = true;
             },
             .expr_stmt => |expr_stmt| {
-                try self.detectRuntimeNeedsExpr(expr_stmt.value.*);
+                // Skip docstrings (same as in visitNode)
+                const is_docstring = switch (expr_stmt.value.*) {
+                    .constant => |c| c.value == .string,
+                    else => false,
+                };
+
+                if (!is_docstring) {
+                    try self.detectRuntimeNeedsExpr(expr_stmt.value.*);
+                }
             },
             .assign => |assign| {
                 try self.detectRuntimeNeedsExpr(assign.value.*);
@@ -319,12 +327,20 @@ pub const ZigCodeGenerator = struct {
         switch (node) {
             .assign => |assign| try self.visitAssign(assign),
             .expr_stmt => |expr_stmt| {
-                const result = try self.visitExpr(expr_stmt.value.*);
-                // Expression statement - emit it with semicolon
-                if (result.code.len > 0) {
-                    var buf = std.ArrayList(u8){};
-                    try buf.writer(self.allocator).print("{s};", .{result.code});
-                    try self.emit(try buf.toOwnedSlice(self.allocator));
+                // Skip docstrings (standalone string constants)
+                const is_docstring = switch (expr_stmt.value.*) {
+                    .constant => |c| c.value == .string,
+                    else => false,
+                };
+
+                if (!is_docstring) {
+                    const result = try self.visitExpr(expr_stmt.value.*);
+                    // Expression statement - emit it with semicolon
+                    if (result.code.len > 0) {
+                        var buf = std.ArrayList(u8){};
+                        try buf.writer(self.allocator).print("{s};", .{result.code});
+                        try self.emit(try buf.toOwnedSlice(self.allocator));
+                    }
                 }
             },
             .if_stmt => |if_node| try self.visitIf(if_node),
@@ -484,8 +500,70 @@ pub const ZigCodeGenerator = struct {
         switch (constant.value) {
             .string => |str| {
                 var buf = std.ArrayList(u8){};
-                // str already includes quotes from lexer
-                try buf.writer(self.allocator).print("runtime.PyString.create(allocator, {s})", .{str});
+
+                // Strip Python quotes and extract content
+                var content: []const u8 = str;
+
+                // Handle triple quotes
+                if (str.len >= 6 and std.mem.startsWith(u8, str, "\"\"\"")) {
+                    content = str[3 .. str.len - 3];
+                } else if (str.len >= 6 and std.mem.startsWith(u8, str, "'''")) {
+                    content = str[3 .. str.len - 3];
+                    // Handle single/double quotes
+                } else if (str.len >= 2) {
+                    content = str[1 .. str.len - 1];
+                }
+
+                // Generate Zig code with proper escaping
+                try buf.writer(self.allocator).writeAll("runtime.PyString.create(allocator, \"");
+
+                // Escape content for Zig string
+                // Python escape sequences: already processed by Python lexer,
+                // we just need to re-escape for Zig syntax
+                var i: usize = 0;
+                while (i < content.len) : (i += 1) {
+                    const c = content[i];
+                    switch (c) {
+                        '\\' => {
+                            // Check if this is an escape sequence
+                            if (i + 1 < content.len) {
+                                const next = content[i + 1];
+                                switch (next) {
+                                    'n', 'r', 't', '\\', '\"', '\'', '0', 'a', 'b', 'f', 'v' => {
+                                        // Pass through escape sequences
+                                        try buf.writer(self.allocator).writeByte('\\');
+                                        i += 1;
+                                        try buf.writer(self.allocator).writeByte(content[i]);
+                                    },
+                                    'x', 'u', 'U' => {
+                                        // Hex/Unicode escapes - pass through for now
+                                        try buf.writer(self.allocator).writeAll("\\\\");
+                                    },
+                                    else => {
+                                        try buf.writer(self.allocator).writeAll("\\\\");
+                                    },
+                                }
+                            } else {
+                                try buf.writer(self.allocator).writeAll("\\\\");
+                            }
+                        },
+                        '\"' => try buf.writer(self.allocator).writeAll("\\\""),
+                        '\n' => try buf.writer(self.allocator).writeAll("\\n"),
+                        '\r' => try buf.writer(self.allocator).writeAll("\\r"),
+                        '\t' => try buf.writer(self.allocator).writeAll("\\t"),
+                        else => {
+                            if (c >= 32 and c <= 126) {
+                                try buf.writer(self.allocator).writeByte(c);
+                            } else {
+                                // Non-printable - escape as hex
+                                try buf.writer(self.allocator).print("\\x{X:0>2}", .{c});
+                            }
+                        },
+                    }
+                }
+
+                try buf.writer(self.allocator).writeAll("\")");
+
                 return ExprResult{
                     .code = try buf.toOwnedSlice(self.allocator),
                     .needs_try = true,
@@ -574,6 +652,8 @@ pub const ZigCodeGenerator = struct {
                     return self.visitLenCall(call.args);
                 } else if (std.mem.eql(u8, func_name.id, "abs")) {
                     return self.visitAbsCall(call.args);
+                } else if (std.mem.eql(u8, func_name.id, "round")) {
+                    return self.visitRoundCall(call.args);
                 } else if (std.mem.eql(u8, func_name.id, "min")) {
                     return self.visitMinCall(call.args);
                 } else if (std.mem.eql(u8, func_name.id, "max")) {
@@ -852,6 +932,23 @@ pub const ZigCodeGenerator = struct {
 
         var buf = std.ArrayList(u8){};
         try buf.writer(self.allocator).print("@abs({s})", .{arg_result.code});
+
+        return ExprResult{
+            .code = try buf.toOwnedSlice(self.allocator),
+            .needs_try = false,
+        };
+    }
+
+    fn visitRoundCall(self: *ZigCodeGenerator, args: []ast.Node) CodegenError!ExprResult {
+        if (args.len == 0) return error.MissingLenArg;
+
+        const arg = args[0];
+        const arg_result = try self.visitExpr(arg);
+
+        var buf = std.ArrayList(u8){};
+        // Python's round() returns an int, Zig's @round() returns same type
+        // Cast to i64 to match Python behavior
+        try buf.writer(self.allocator).print("@as(i64, @intFromFloat(@round({s})))", .{arg_result.code});
 
         return ExprResult{
             .code = try buf.toOwnedSlice(self.allocator),
@@ -1183,6 +1280,8 @@ pub const ZigCodeGenerator = struct {
 
         const op_str = switch (unaryop.op) {
             .Not => "!",
+            .USub => "-",
+            .UAdd => "+",
         };
 
         var buf = std.ArrayList(u8){};

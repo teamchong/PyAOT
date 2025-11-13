@@ -173,6 +173,18 @@ pub const Parser = struct {
 
         while (!self.match(.RParen)) {
             const arg_name = try self.expect(.Ident);
+
+            // Skip type annotation if present (e.g., : int)
+            if (self.match(.Colon)) {
+                // Skip the type - just consume tokens until comma or rparen
+                while (self.current < self.tokens.len and
+                    self.tokens[self.current].type != .Comma and
+                    self.tokens[self.current].type != .RParen)
+                {
+                    self.current += 1;
+                }
+            }
+
             try args.append(self.allocator, .{
                 .name = arg_name.lexeme,
                 .type_annotation = null,
@@ -181,6 +193,27 @@ pub const Parser = struct {
             if (!self.match(.Comma)) {
                 _ = try self.expect(.RParen);
                 break;
+            }
+        }
+
+        // Skip return type annotation if present (e.g., -> int)
+        if (self.tokens[self.current].type == .Arrow or
+            (self.tokens[self.current].type == .Minus and
+                self.current + 1 < self.tokens.len and
+                self.tokens[self.current + 1].type == .Gt))
+        {
+            // Skip -> or - >
+            if (self.match(.Arrow)) {
+                // Single arrow token
+            } else {
+                _ = self.match(.Minus);
+                _ = self.match(.Gt);
+            }
+            // Skip the return type
+            while (self.current < self.tokens.len and
+                self.tokens[self.current].type != .Colon)
+            {
+                self.current += 1;
             }
         }
 
@@ -832,6 +865,30 @@ pub const Parser = struct {
                 },
                 .LBracket => {
                     return try self.parseList();
+                },
+                .Minus => {
+                    // Unary minus (e.g., -10)
+                    _ = self.advance();
+                    const operand_ptr = try self.allocator.create(ast.Node);
+                    operand_ptr.* = try self.parsePrimary();
+                    return ast.Node{
+                        .unaryop = .{
+                            .op = .USub,
+                            .operand = operand_ptr,
+                        },
+                    };
+                },
+                .Plus => {
+                    // Unary plus (e.g., +10)
+                    _ = self.advance();
+                    const operand_ptr = try self.allocator.create(ast.Node);
+                    operand_ptr.* = try self.parsePrimary();
+                    return ast.Node{
+                        .unaryop = .{
+                            .op = .UAdd,
+                            .operand = operand_ptr,
+                        },
+                    };
                 },
                 else => {
                     std.debug.print("Unexpected token in primary: {s} at line {d}:{d}\n", .{

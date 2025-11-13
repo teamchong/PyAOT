@@ -27,7 +27,8 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
     // Write temp file
     const tmp_file = try std.fs.createFileAbsolute(tmp_path, .{});
     defer tmp_file.close();
-    defer std.fs.deleteFileAbsolute(tmp_path) catch {};
+    // Keep for debugging - don't delete
+    // defer std.fs.deleteFileAbsolute(tmp_path) catch {};
 
     try tmp_file.writeAll(zig_code);
 

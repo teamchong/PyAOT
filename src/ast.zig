@@ -148,6 +148,8 @@ pub const BoolOperator = enum {
 
 pub const UnaryOperator = enum {
     Not,
+    UAdd, // Unary plus (+x)
+    USub, // Unary minus (-x)
 };
 
 pub const Value = union(enum) {
