@@ -5,6 +5,8 @@ pub const Node = union(enum) {
     module: Module,
     assign: Assign,
     binop: BinOp,
+    compare: Compare,
+    boolop: BoolOp,
     call: Call,
     name: Name,
     constant: Constant,
@@ -14,6 +16,10 @@ pub const Node = union(enum) {
     function_def: FunctionDef,
     class_def: ClassDef,
     return_stmt: Return,
+    list: List,
+    subscript: Subscript,
+    attribute: Attribute,
+    expr_stmt: ExprStmt,
 
     pub const Module = struct {
         body: []Node,
@@ -44,9 +50,9 @@ pub const Node = union(enum) {
     };
 
     pub const If = struct {
-        test: *Node,
+        condition: *Node,
         body: []Node,
-        orelse: []Node,
+        else_body: []Node,
     };
 
     pub const For = struct {
@@ -56,7 +62,7 @@ pub const Node = union(enum) {
     };
 
     pub const While = struct {
-        test: *Node,
+        condition: *Node,
         body: []Node,
     };
 
@@ -74,6 +80,35 @@ pub const Node = union(enum) {
     pub const Return = struct {
         value: ?*Node,
     };
+
+    pub const Compare = struct {
+        left: *Node,
+        ops: []CompareOp,
+        comparators: []Node,
+    };
+
+    pub const BoolOp = struct {
+        op: BoolOperator,
+        values: []Node,
+    };
+
+    pub const List = struct {
+        elts: []Node,
+    };
+
+    pub const Subscript = struct {
+        value: *Node,
+        slice: *Node,
+    };
+
+    pub const Attribute = struct {
+        value: *Node,
+        attr: []const u8,
+    };
+
+    pub const ExprStmt = struct {
+        value: *Node,
+    };
 };
 
 pub const Operator = enum {
@@ -84,6 +119,22 @@ pub const Operator = enum {
     FloorDiv,
     Mod,
     Pow,
+};
+
+pub const CompareOp = enum {
+    Eq,
+    NotEq,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+    In,
+    NotIn,
+};
+
+pub const BoolOperator = enum {
+    And,
+    Or,
 };
 
 pub const Value = union(enum) {
