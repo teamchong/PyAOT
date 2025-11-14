@@ -77,6 +77,7 @@ pub const ZigCodeGenerator = struct {
     needs_runtime: bool,
     needs_allocator: bool,
     needs_http: bool,
+    needs_python: bool,
     has_async: bool,
     temp_var_counter: usize,
     is_shared_lib: bool, // Generate for shared library (.so) or binary
@@ -101,6 +102,7 @@ pub const ZigCodeGenerator = struct {
             .needs_runtime = false,
             .needs_allocator = false,
             .needs_http = false,
+            .needs_python = false,
             .has_async = false,
             .temp_var_counter = 0,
             .is_shared_lib = is_shared_lib,
@@ -266,6 +268,9 @@ pub const ZigCodeGenerator = struct {
         if (self.needs_http) {
             try self.emit("const http = @import(\"http.zig\");");
         }
+        if (self.needs_python) {
+            try self.emit("const python = @import(\"python.zig\");");
+        }
         try self.emit("");
 
         // Phase 3.5: Generate async executor if needed
@@ -304,6 +309,13 @@ pub const ZigCodeGenerator = struct {
             try self.emit("defer _ = gpa.deinit();");
             try self.emit("var allocator = gpa.allocator();");
             try self.emit("_ = &allocator; // Suppress unused warning when no runtime operations need it");
+            try self.emit("");
+        }
+
+        // Initialize Python interpreter if needed
+        if (self.needs_python) {
+            try self.emit("try python.initialize();");
+            try self.emit("defer python.finalize();");
             try self.emit("");
         }
 
@@ -381,6 +393,14 @@ pub const ZigCodeGenerator = struct {
                 for (for_stmt.body) |stmt| {
                     try self.detectRuntimeNeeds(stmt);
                 }
+            },
+            .import_stmt => {
+                self.needs_python = true;
+                self.needs_allocator = true;
+            },
+            .import_from => {
+                self.needs_python = true;
+                self.needs_allocator = true;
             },
             else => {},
         }

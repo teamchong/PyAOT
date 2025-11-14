@@ -24,6 +24,8 @@ pub const Node = union(enum) {
     attribute: Attribute,
     expr_stmt: ExprStmt,
     await_expr: AwaitExpr,
+    import_stmt: Import,
+    import_from: ImportFrom,
 
     pub const Module = struct {
         body: []Node,
@@ -142,6 +144,19 @@ pub const Node = union(enum) {
 
     pub const AwaitExpr = struct {
         value: *Node,
+    };
+
+    /// Import statement: import numpy as np
+    pub const Import = struct {
+        module: []const u8, // "numpy"
+        asname: ?[]const u8, // "np" or null
+    };
+
+    /// From-import statement: from numpy import array, zeros
+    pub const ImportFrom = struct {
+        module: []const u8, // "numpy"
+        names: [][]const u8, // ["array", "zeros"]
+        asnames: []?[]const u8, // [null, null] or ["arr", null]
     };
 
     /// Recursively free all allocations in the AST
@@ -270,6 +285,14 @@ pub const Node = union(enum) {
             .await_expr => |a| {
                 a.value.deinit(allocator);
                 allocator.destroy(a.value);
+            },
+            .import_stmt => |i| {
+                // Strings are owned by parser arena, no need to free
+                _ = i;
+            },
+            .import_from => |i| {
+                allocator.free(i.names);
+                allocator.free(i.asnames);
             },
             // Leaf nodes need no cleanup
             .name, .constant => {},

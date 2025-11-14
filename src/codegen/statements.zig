@@ -38,6 +38,8 @@ pub fn visitNode(self: *ZigCodeGenerator, node: ast.Node) CodegenError!void {
         .while_stmt => |while_node| try @import("control_flow.zig").visitWhile(self, while_node),
         .function_def => |func| try self.visitFunctionDef(func),
         .return_stmt => |ret| try visitReturn(self, ret),
+        .import_stmt => |import_node| try visitImport(self, import_node),
+        .import_from => |import_from| try visitImportFrom(self, import_from),
         else => {}, // Ignore other node types for now
     }
 }
@@ -372,3 +374,41 @@ fn visitReturn(self: *ZigCodeGenerator, ret: ast.Node.Return) CodegenError!void 
         try self.emit("return;");
     }
 }
+
+/// Generate code for import statement
+fn visitImport(self: *ZigCodeGenerator, import_node: ast.Node.Import) CodegenError!void {
+    self.needs_allocator = true;
+    self.needs_python = true;
+
+    const alias = import_node.asname orelse import_node.module;
+
+    var buf = std.ArrayList(u8){};
+    try buf.writer(self.temp_allocator).print(
+        "const {s} = try python.importModule(allocator, \"{s}\");",
+        .{ alias, import_node.module }
+    );
+    try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
+
+    // Suppress unused warning
+    var buf2 = std.ArrayList(u8){};
+    try buf2.writer(self.temp_allocator).print("_ = {s};", .{alias});
+    try self.emitOwned(try buf2.toOwnedSlice(self.temp_allocator));
+}
+
+/// Generate code for from-import statement
+fn visitImportFrom(self: *ZigCodeGenerator, import_from: ast.Node.ImportFrom) CodegenError!void {
+    self.needs_allocator = true;
+    self.needs_python = true;
+
+    for (import_from.names, 0..) |name, i| {
+        const alias = if (import_from.asnames[i]) |a| a else name;
+
+        var buf = std.ArrayList(u8){};
+        try buf.writer(self.temp_allocator).print(
+            "const {s} = try python.importFrom(allocator, \"{s}\", \"{s}\");",
+            .{ alias, import_from.module, name }
+        );
+        try self.emitOwned(try buf.toOwnedSlice(self.temp_allocator));
+    }
+}
+
