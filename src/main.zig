@@ -2,7 +2,6 @@ const std = @import("std");
 const ast = @import("ast.zig");
 const lexer = @import("lexer.zig");
 const parser = @import("parser.zig");
-const codegen = @import("codegen.zig");
 const compiler = @import("compiler.zig");
 const native_types = @import("analysis/native_types.zig");
 const native_codegen = @import("codegen/native.zig");

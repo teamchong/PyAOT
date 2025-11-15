@@ -43,6 +43,14 @@ pub const NativeCodegen = struct {
         try self.emit("pub fn main() !void {\n");
         self.indent();
 
+        // Setup allocator (needed for JSON, HTTP, async)
+        try self.emitIndent();
+        try self.emit("var gpa = std.heap.GeneralPurposeAllocator(.{}){};\n");
+        try self.emitIndent();
+        try self.emit("defer _ = gpa.deinit();\n");
+        try self.emitIndent();
+        try self.emit("const allocator = gpa.allocator();\n\n");
+
         // Generate statements
         for (module.body) |stmt| {
             try self.generateStmt(stmt);
@@ -77,12 +85,14 @@ pub const NativeCodegen = struct {
                 // TODO: Track mutations to determine const vs var
                 try self.emitIndent();
                 try self.output.appendSlice(self.allocator, "const ");
-
                 try self.output.appendSlice(self.allocator, var_name);
-                try self.output.appendSlice(self.allocator, ": ");
 
-                // Emit type
-                try value_type.toZigType(self.allocator, &self.output);
+                // Only emit type annotation for known types
+                // For unknown types (json.loads, etc.), let Zig infer
+                if (value_type != .unknown) {
+                    try self.output.appendSlice(self.allocator, ": ");
+                    try value_type.toZigType(self.allocator, &self.output);
+                }
 
                 try self.output.appendSlice(self.allocator, " = ");
 
@@ -283,9 +293,22 @@ pub const NativeCodegen = struct {
             .float => try self.output.writer(self.allocator).print("{d}", .{constant.value.float}),
             .bool => try self.output.appendSlice(self.allocator, if (constant.value.bool) "true" else "false"),
             .string => |s| {
-                // Strip Python quotes and add Zig quotes
+                // Strip Python quotes
                 const content = if (s.len >= 2) s[1..s.len-1] else s;
-                try self.output.writer(self.allocator).print("\"{s}\"", .{content});
+
+                // Escape quotes and backslashes for Zig string literal
+                try self.output.appendSlice(self.allocator, "\"");
+                for (content) |c| {
+                    switch (c) {
+                        '"' => try self.output.appendSlice(self.allocator, "\\\""),
+                        '\\' => try self.output.appendSlice(self.allocator, "\\\\"),
+                        '\n' => try self.output.appendSlice(self.allocator, "\\n"),
+                        '\r' => try self.output.appendSlice(self.allocator, "\\r"),
+                        '\t' => try self.output.appendSlice(self.allocator, "\\t"),
+                        else => try self.output.writer(self.allocator).print("{c}", .{c}),
+                    }
+                }
+                try self.output.appendSlice(self.allocator, "\"");
             },
         }
     }
@@ -347,7 +370,40 @@ pub const NativeCodegen = struct {
     }
 
     fn genCall(self: *NativeCodegen, call: ast.Node.Call) CodegenError!void {
-        // Most calls handled specially, this is fallback
+        // Check for module.function() calls (json.loads, http.get, etc.)
+        if (call.func.* == .attribute) {
+            const attr = call.func.attribute;
+            if (attr.value.* == .name) {
+                const module_name = attr.value.name.id;
+                const func_name = attr.attr;
+
+                // Handle json.loads()
+                if (std.mem.eql(u8, module_name, "json") and std.mem.eql(u8, func_name, "loads")) {
+                    try self.genJsonLoads(call.args);
+                    return;
+                }
+
+                // Handle json.dumps()
+                if (std.mem.eql(u8, module_name, "json") and std.mem.eql(u8, func_name, "dumps")) {
+                    try self.genJsonDumps(call.args);
+                    return;
+                }
+
+                // Handle http.get()
+                if (std.mem.eql(u8, module_name, "http") and std.mem.eql(u8, func_name, "get")) {
+                    try self.genHttpGet(call.args);
+                    return;
+                }
+
+                // Handle http.post()
+                if (std.mem.eql(u8, module_name, "http") and std.mem.eql(u8, func_name, "post")) {
+                    try self.genHttpPost(call.args);
+                    return;
+                }
+            }
+        }
+
+        // Fallback: regular function call
         if (call.func.* == .name) {
             try self.output.appendSlice(self.allocator, call.func.name.id);
             try self.output.appendSlice(self.allocator, "(");
@@ -359,6 +415,57 @@ pub const NativeCodegen = struct {
 
             try self.output.appendSlice(self.allocator, ")");
         }
+    }
+
+    fn genJsonLoads(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
+        if (args.len != 1) {
+            // TODO: Error handling
+            return;
+        }
+
+        // Generate block that returns just the value (arena is leaked for now)
+        // TODO: Implement proper scope-based cleanup
+        try self.output.appendSlice(self.allocator, "blk: { const parsed = try std.json.parseFromSlice(std.json.Value, allocator, ");
+        try self.genExpr(args[0]);
+        try self.output.appendSlice(self.allocator, ", .{}); break :blk parsed.value; }");
+    }
+
+    fn genJsonDumps(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
+        if (args.len != 1) {
+            // TODO: Error handling
+            return;
+        }
+
+        // Generate: std.json.stringifyAlloc(allocator, value, .{})
+        try self.output.appendSlice(self.allocator, "std.json.stringifyAlloc(allocator, ");
+        try self.genExpr(args[0]);
+        try self.output.appendSlice(self.allocator, ", .{})");
+    }
+
+    fn genHttpGet(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
+        if (args.len != 1) {
+            // TODO: Error handling
+            return;
+        }
+
+        // Generate: blk: { var client = std.http.Client{ .allocator = allocator }; defer client.deinit(); var buf = std.ArrayList(u8){}; defer buf.deinit(allocator); const uri = try std.Uri.parse(url); _ = try client.fetch(.{ .location = .{ .uri = uri }, .response_storage = .{ .dynamic = &buf } }); break :blk buf.items; }
+        try self.output.appendSlice(self.allocator, "blk: { var client = std.http.Client{ .allocator = allocator }; defer client.deinit(); var buf = std.ArrayList(u8){}; defer buf.deinit(allocator); const uri = try std.Uri.parse(");
+        try self.genExpr(args[0]);
+        try self.output.appendSlice(self.allocator, "); _ = try client.fetch(.{ .location = .{ .uri = uri }, .response_storage = .{ .dynamic = &buf } }); break :blk buf.items; }");
+    }
+
+    fn genHttpPost(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
+        if (args.len != 2) {
+            // TODO: Error handling
+            return;
+        }
+
+        // Generate HTTP POST with body
+        try self.output.appendSlice(self.allocator, "blk: { var client = std.http.Client{ .allocator = allocator }; defer client.deinit(); var buf = std.ArrayList(u8){}; defer buf.deinit(allocator); const uri = try std.Uri.parse(");
+        try self.genExpr(args[0]);
+        try self.output.appendSlice(self.allocator, "); const body_data = ");
+        try self.genExpr(args[1]);
+        try self.output.appendSlice(self.allocator, "; _ = try client.fetch(.{ .method = .POST, .location = .{ .uri = uri }, .payload = body_data, .response_storage = .{ .dynamic = &buf } }); break :blk buf.items; }");
     }
 
     fn genList(self: *NativeCodegen, list: ast.Node.List) CodegenError!void {
