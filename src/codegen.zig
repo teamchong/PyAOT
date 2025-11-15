@@ -350,7 +350,6 @@ pub const ZigCodeGenerator = struct {
 
         // Swap to body_buffer for main function body generation
         const saved_output = self.output;
-        _ = saved_output; // Will be restored later
         self.output = self.body_buffer;
 
         // Generate main function header (into body buffer for now)
@@ -398,6 +397,25 @@ pub const ZigCodeGenerator = struct {
         // Close _pyaot_main_impl() or main()
         self.dedent();
         try self.emit("}");
+
+        // Phase 5.5: Restore output and insert preamble + body
+        // Swap buffers back - self.output now contains main function body
+        // Save the body content before restoring
+        const body_content = try self.output.toOwnedSlice(self.allocator);
+
+        // Restore original output
+        self.output = saved_output;
+
+        // Emit preamble (cache variables, etc.) into main output
+        for (self.preamble.items) |line| {
+            try self.output.writer(self.allocator).print("{s}\n", .{line});
+        }
+        if (self.preamble.items.len > 0) {
+            try self.output.append(self.allocator, '\n');
+        }
+
+        // Append body (main function) to final output
+        try self.output.appendSlice(self.allocator, body_content);
     }
 
     /// Detect if node requires PyObject runtime

@@ -809,7 +809,10 @@ fn visitPythonFunctionCall(self: *ZigCodeGenerator, module_code: []const u8, fun
                     if (constant.value == .string) {
                         // Generate cached JSON parse for constant strings
                         // This optimizes config files and constant JSON
-                        const json_str = constant.value.string;
+
+                        // Get the properly formatted Zig string code (includes runtime.PyString.create call)
+                        const str_result = try expressions.visitExpr(self, args[0]);
+                        const str_code = str_result.code;
 
                         // Generate a static cached variable name
                         const cache_var = try std.fmt.allocPrint(
@@ -831,13 +834,13 @@ fn visitPythonFunctionCall(self: *ZigCodeGenerator, module_code: []const u8, fun
                         var code_buf = std.ArrayList(u8){};
                         try code_buf.writer(self.temp_allocator).print(
                             "blk: {{ if ({s}) |cached| {{ runtime.incref(cached); break :blk cached; }} " ++
-                            "const str = try runtime.PyString.create(allocator, {s}); " ++
+                            "const str = try {s}; " ++
                             "const parsed = try runtime.jsonLoads(str, allocator); " ++
                             "runtime.decref(str, allocator); " ++
                             "{s} = parsed; " ++
                             "runtime.incref(parsed); " ++
                             "break :blk parsed; }}",
-                            .{cache_var, json_str, cache_var}
+                            .{ cache_var, str_code, cache_var }
                         );
 
                         const code = try code_buf.toOwnedSlice(self.temp_allocator);
