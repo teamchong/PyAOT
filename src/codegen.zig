@@ -102,6 +102,7 @@ pub const ZigCodeGenerator = struct {
     current_allocator: []const u8, // Current allocator name (default "allocator", can be "loop_allocator")
     in_loop: bool, // Track if we're inside a loop body
     json_cache_counter: usize, // Counter for generating unique JSON cache variable names
+    json_cache_map: std.StringHashMap([]const u8), // Map JSON string -> cache variable name
     preamble: std.ArrayList([]const u8), // Code to emit before main function (for caches, etc.)
 
     pub fn init(allocator: std.mem.Allocator, is_shared_lib: bool) !*ZigCodeGenerator {
@@ -139,6 +140,7 @@ pub const ZigCodeGenerator = struct {
             .current_allocator = "allocator",
             .in_loop = false,
             .json_cache_counter = 0,
+            .json_cache_map = std.StringHashMap([]const u8).init(allocator),
             .preamble = std.ArrayList([]const u8){},
         };
         // Set temp_allocator after arena is moved into struct
@@ -160,6 +162,7 @@ pub const ZigCodeGenerator = struct {
         self.class_names.deinit();
         self.class_has_methods.deinit();
         self.method_return_types.deinit();
+        self.json_cache_map.deinit();
         self.preamble.deinit(self.allocator);
         // Free class_methods
         var it = self.class_methods.iterator();

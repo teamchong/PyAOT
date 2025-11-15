@@ -810,25 +810,38 @@ fn visitPythonFunctionCall(self: *ZigCodeGenerator, module_code: []const u8, fun
                         // Generate cached JSON parse for constant strings
                         // This optimizes config files and constant JSON
 
-                        // Get the properly formatted Zig string code (includes runtime.PyString.create call)
+                        // Get the JSON string content for deduplication
+                        const json_str = constant.value.string;
+
+                        // Check if we already have a cache for this exact JSON string
+                        const cache_var = if (self.json_cache_map.get(json_str)) |existing_var|
+                            existing_var
+                        else blk: {
+                            // First time seeing this JSON string - create new cache
+                            const new_cache_var = try std.fmt.allocPrint(
+                                self.allocator,
+                                "_json_cache_{d}",
+                                .{self.json_cache_counter}
+                            );
+                            self.json_cache_counter += 1;
+
+                            // Store in map for future reuse
+                            try self.json_cache_map.put(json_str, new_cache_var);
+
+                            // Emit cache initialization at module level
+                            var cache_buf = std.ArrayList(u8){};
+                            try cache_buf.writer(self.temp_allocator).print(
+                                "// Cached JSON parse for constant string\nvar {s}: ?*runtime.PyObject = null;",
+                                .{new_cache_var}
+                            );
+                            try self.preamble.append(self.allocator, try cache_buf.toOwnedSlice(self.temp_allocator));
+
+                            break :blk new_cache_var;
+                        };
+
+                        // Get the properly formatted Zig string code
                         const str_result = try expressions.visitExpr(self, args[0]);
                         const str_code = str_result.code;
-
-                        // Generate a static cached variable name
-                        const cache_var = try std.fmt.allocPrint(
-                            self.temp_allocator,
-                            "_json_cache_{d}",
-                            .{self.json_cache_counter}
-                        );
-                        self.json_cache_counter += 1;
-
-                        // Emit cache initialization at module level
-                        var cache_buf = std.ArrayList(u8){};
-                        try cache_buf.writer(self.temp_allocator).print(
-                            "// Cached JSON parse for constant string\nvar {s}: ?*runtime.PyObject = null;",
-                            .{cache_var}
-                        );
-                        try self.preamble.append(self.allocator, try cache_buf.toOwnedSlice(self.temp_allocator));
 
                         // Generate cache check + parse code
                         var code_buf = std.ArrayList(u8){};
