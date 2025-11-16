@@ -15,6 +15,8 @@ const builtins = @import("builtins.zig");
 const methods = @import("methods.zig");
 const analyzer = @import("analyzer.zig");
 const dispatch = @import("dispatch.zig");
+const statements = @import("statements.zig");
+const expressions = @import("expressions.zig");
 
 /// Error set for code generation
 pub const CodegenError = error{
@@ -62,7 +64,7 @@ pub const NativeCodegen = struct {
         // PHASE 3: Generate function definitions (before main)
         for (module.body) |stmt| {
             if (stmt == .function_def) {
-                try self.genFunctionDef(stmt.function_def);
+                try statements.genFunctionDef(self, stmt.function_def);
                 try self.emit("\n");
             }
         }
@@ -94,525 +96,41 @@ pub const NativeCodegen = struct {
         return self.output.toOwnedSlice(self.allocator);
     }
 
-    fn generateStmt(self: *NativeCodegen, node: ast.Node) CodegenError!void {
+    pub fn generateStmt(self: *NativeCodegen, node: ast.Node) CodegenError!void {
         switch (node) {
-            .assign => |assign| try self.genAssign(assign),
-            .expr_stmt => |expr| try self.genExprStmt(expr.value.*),
-            .if_stmt => |if_stmt| try self.genIf(if_stmt),
-            .while_stmt => |while_stmt| try self.genWhile(while_stmt),
-            .for_stmt => |for_stmt| try self.genFor(for_stmt),
-            .return_stmt => |ret| try self.genReturn(ret),
-            .import_stmt => {},  // Native modules - no import needed
+            .assign => |assign| try statements.genAssign(self, assign),
+            .expr_stmt => |expr| try statements.genExprStmt(self, expr.value.*),
+            .if_stmt => |if_stmt| try statements.genIf(self, if_stmt),
+            .while_stmt => |while_stmt| try statements.genWhile(self, while_stmt),
+            .for_stmt => |for_stmt| try statements.genFor(self, for_stmt),
+            .return_stmt => |ret| try statements.genReturn(self, ret),
+            .import_stmt => {}, // Native modules - no import needed
             else => {},
         }
     }
 
-    fn genFunctionDef(self: *NativeCodegen, func: ast.Node.FunctionDef) CodegenError!void {
-        // Generate function signature: fn name(param: type, ...) return_type {
-        try self.emit("fn ");
-        try self.emit(func.name);
-        try self.emit("(");
-
-        // Generate parameters
-        for (func.args, 0..) |arg, i| {
-            if (i > 0) try self.emit(", ");
-            try self.emit(arg.name);
-            try self.emit(": ");
-            // Convert Python type hint to Zig type
-            const zig_type = pythonTypeToZig(arg.type_annotation);
-            try self.emit(zig_type);
-        }
-
-        try self.emit(") ");
-
-        // Return type - for now assume i64 if not void
-        // TODO: Proper return type inference
-        try self.emit("i64 {\n");
-
-        self.indent();
-
-        // Generate function body
-        for (func.body) |stmt| {
-            try self.generateStmt(stmt);
-        }
-
-        self.dedent();
-        try self.emit("}\n");
-    }
-
-    fn genReturn(self: *NativeCodegen, ret: ast.Node.Return) CodegenError!void {
-        try self.emitIndent();
-        try self.emit("return ");
-        if (ret.value) |value| {
-            try self.genExpr(value.*);
-        }
-        try self.emit(";\n");
-    }
-
-    fn pythonTypeToZig(type_hint: ?[]const u8) []const u8 {
-        if (type_hint) |hint| {
-            if (std.mem.eql(u8, hint, "int")) return "i64";
-            if (std.mem.eql(u8, hint, "float")) return "f64";
-            if (std.mem.eql(u8, hint, "bool")) return "bool";
-            if (std.mem.eql(u8, hint, "str")) return "[]const u8";
-        }
-        return "anytype";  // fallback
-    }
-
-    fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!void {
-        const value_type = try self.type_inferrer.inferExpr(assign.value.*);
-
-        for (assign.targets) |target| {
-            if (target == .name) {
-                const var_name = target.name.id;
-
-                // ArrayLists and dicts need var instead of const for mutation
-                const is_arraylist = (assign.value.* == .list and assign.value.list.elts.len == 0);
-                const is_dict = (assign.value.* == .dict);
-
-                // Check if value allocates memory
-                const is_allocated_string = blk: {
-                    if (assign.value.* == .call) {
-                        // Method calls that allocate: upper(), lower(), replace()
-                        if (assign.value.call.func.* == .attribute) {
-                            const method_name = assign.value.call.func.attribute.attr;
-                            if (std.mem.eql(u8, method_name, "upper") or
-                                std.mem.eql(u8, method_name, "lower") or
-                                std.mem.eql(u8, method_name, "replace")) {
-                                break :blk true;
-                            }
-                        }
-                        // Built-in functions that allocate: sorted(), reversed()
-                        if (assign.value.call.func.* == .name) {
-                            const func_name = assign.value.call.func.name.id;
-                            if (std.mem.eql(u8, func_name, "sorted") or
-                                std.mem.eql(u8, func_name, "reversed")) {
-                                break :blk true;
-                            }
-                        }
-                    }
-                    break :blk false;
-                };
-
-                try self.emitIndent();
-                if (is_arraylist or is_dict) {
-                    try self.output.appendSlice(self.allocator, "var ");
-                } else {
-                    try self.output.appendSlice(self.allocator, "const ");
-                }
-                try self.output.appendSlice(self.allocator, var_name);
-
-                // Only emit type annotation for known types that aren't dicts, lists, or ArrayLists
-                // For lists/ArrayLists/dicts, let Zig infer the type from the initializer
-                // For unknown types (json.loads, etc.), let Zig infer
-                const is_list = (value_type == .list);
-                if (value_type != .unknown and !is_dict and !is_arraylist and !is_list) {
-                    try self.output.appendSlice(self.allocator, ": ");
-                    try value_type.toZigType(self.allocator, &self.output);
-                }
-
-                try self.output.appendSlice(self.allocator, " = ");
-
-                // Emit value
-                try self.genExpr(assign.value.*);
-
-                try self.output.appendSlice(self.allocator, ";\n");
-
-                // Add defer cleanup for ArrayLists and Dicts
-                if (is_arraylist) {
-                    try self.emitIndent();
-                    try self.output.writer(self.allocator).print("defer {s}.deinit(allocator);\n", .{var_name});
-                }
-                if (is_dict) {
-                    try self.emitIndent();
-                    try self.output.writer(self.allocator).print("defer {s}.deinit();\n", .{var_name});
-                }
-                // Add defer cleanup for allocated strings (upper/lower)
-                if (is_allocated_string) {
-                    try self.emitIndent();
-                    try self.output.writer(self.allocator).print("defer allocator.free({s});\n", .{var_name});
-                }
-            }
-        }
-    }
-
-    fn genExprStmt(self: *NativeCodegen, expr: ast.Node) CodegenError!void {
-        try self.emitIndent();
-
-        // Special handling for print()
-        if (expr == .call and expr.call.func.* == .name) {
-            const func_name = expr.call.func.name.id;
-            if (std.mem.eql(u8, func_name, "print")) {
-                try self.genPrint(expr.call.args);
-                return;
-            }
-        }
-
-        try self.genExpr(expr);
-        try self.output.appendSlice(self.allocator, ";\n");
-    }
-
-    fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
-        if (args.len == 0) {
-            try self.output.appendSlice(self.allocator, "std.debug.print(\"\\n\", .{});\n");
-            return;
-        }
-
-        try self.output.appendSlice(self.allocator, "std.debug.print(\"");
-
-        // Generate format string
-        for (args, 0..) |arg, i| {
-            const arg_type = try self.type_inferrer.inferExpr(arg);
-            const fmt = switch (arg_type) {
-                .int => "{d}",
-                .float => "{d}",
-                .bool => "{}",
-                .string => "{s}",
-                else => "{any}",
-            };
-            try self.output.appendSlice(self.allocator, fmt);
-
-            if (i < args.len - 1) {
-                try self.output.appendSlice(self.allocator, " ");
-            }
-        }
-
-        try self.output.appendSlice(self.allocator, "\\n\", .{");
-
-        // Generate arguments
-        for (args, 0..) |arg, i| {
-            try self.genExpr(arg);
-            if (i < args.len - 1) {
-                try self.output.appendSlice(self.allocator, ", ");
-            }
-        }
-
-        try self.output.appendSlice(self.allocator, "});\n");
-    }
-
-    fn genIf(self: *NativeCodegen, if_stmt: ast.Node.If) CodegenError!void {
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "if (");
-        try self.genExpr(if_stmt.condition.*);
-        try self.output.appendSlice(self.allocator, ") {\n");
-
-        self.indent();
-        for (if_stmt.body) |stmt| {
-            try self.generateStmt(stmt);
-        }
-        self.dedent();
-
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "}");
-
-        if (if_stmt.else_body.len > 0) {
-            try self.output.appendSlice(self.allocator, " else {\n");
-            self.indent();
-            for (if_stmt.else_body) |stmt| {
-                try self.generateStmt(stmt);
-            }
-            self.dedent();
-            try self.emitIndent();
-            try self.output.appendSlice(self.allocator, "}");
-        }
-
-        try self.output.appendSlice(self.allocator, "\n");
-    }
-
-    fn genWhile(self: *NativeCodegen, while_stmt: ast.Node.While) CodegenError!void {
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "while (");
-        try self.genExpr(while_stmt.condition.*);
-        try self.output.appendSlice(self.allocator, ") {\n");
-
-        self.indent();
-        for (while_stmt.body) |stmt| {
-            try self.generateStmt(stmt);
-        }
-        self.dedent();
-
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "}\n");
-    }
-
-    fn genFor(self: *NativeCodegen, for_stmt: ast.Node.For) CodegenError!void {
-        const target_name = if (for_stmt.target.* == .name) for_stmt.target.*.name.id else "_";
-
-        try self.emitIndent();
-
-        // Handle range() specially
-        if (for_stmt.iter.* == .call and for_stmt.iter.call.func.* == .name) {
-            const func_name = for_stmt.iter.call.func.name.id;
-            if (std.mem.eql(u8, func_name, "range")) {
-                try self.genRangeLoop(target_name, for_stmt.iter.call.args, for_stmt.body);
-                return;
-            }
-        }
-
-        // Generic iteration
-        try self.output.appendSlice(self.allocator, "for (");
-        try self.genExpr(for_stmt.iter.*);
-        try self.output.writer(self.allocator).print(") |{s}| {{\n", .{target_name});
-
-        self.indent();
-        for (for_stmt.body) |stmt| {
-            try self.generateStmt(stmt);
-        }
-        self.dedent();
-
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "}\n");
-    }
-
-    fn genRangeLoop(self: *NativeCodegen, var_name: []const u8, args: []ast.Node, body: []ast.Node) CodegenError!void {
-        // range(n) or range(start, end) or range(start, end, step)
-        try self.output.writer(self.allocator).print("var {s}: i64 = ", .{var_name});
-
-        if (args.len == 1) {
-            try self.output.appendSlice(self.allocator, "0");
-        } else {
-            try self.genExpr(args[0]);
-        }
-
-        try self.output.writer(self.allocator).print(";\nwhile ({s} < ", .{var_name});
-
-        if (args.len == 1) {
-            try self.genExpr(args[0]);
-        } else {
-            try self.genExpr(args[1]);
-        }
-
-        try self.output.writer(self.allocator).print(") {{\n", .{});
-
-        self.indent();
-        for (body) |stmt| {
-            try self.generateStmt(stmt);
-        }
-
-        // Increment
-        try self.emitIndent();
-        try self.output.writer(self.allocator).print("{s} += ", .{var_name});
-        if (args.len == 3) {
-            try self.genExpr(args[2]);
-        } else {
-            try self.output.appendSlice(self.allocator, "1");
-        }
-        try self.output.appendSlice(self.allocator, ";\n");
-
-        self.dedent();
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "}\n");
-    }
-
+    // Expression generation delegated to expressions.zig
     pub fn genExpr(self: *NativeCodegen, node: ast.Node) CodegenError!void {
-        switch (node) {
-            .constant => |c| try self.genConstant(c),
-            .name => |n| try self.output.appendSlice(self.allocator, n.id),
-            .binop => |b| try self.genBinOp(b),
-            .unaryop => |u| try self.genUnaryOp(u),
-            .compare => |c| try self.genCompare(c),
-            .boolop => |b| try self.genBoolOp(b),
-            .call => |c| try self.genCall(c),
-            .list => |l| try self.genList(l),
-            .dict => |d| try self.genDict(d),
-            .subscript => |s| try self.genSubscript(s),
-            else => {},
-        }
+        try expressions.genExpr(self, node);
     }
 
-    fn genConstant(self: *NativeCodegen, constant: ast.Node.Constant) CodegenError!void {
-        switch (constant.value) {
-            .int => try self.output.writer(self.allocator).print("{d}", .{constant.value.int}),
-            .float => try self.output.writer(self.allocator).print("{d}", .{constant.value.float}),
-            .bool => try self.output.appendSlice(self.allocator, if (constant.value.bool) "true" else "false"),
-            .string => |s| {
-                // Strip Python quotes
-                const content = if (s.len >= 2) s[1..s.len-1] else s;
-
-                // Escape quotes and backslashes for Zig string literal
-                try self.output.appendSlice(self.allocator, "\"");
-                for (content) |c| {
-                    switch (c) {
-                        '"' => try self.output.appendSlice(self.allocator, "\\\""),
-                        '\\' => try self.output.appendSlice(self.allocator, "\\\\"),
-                        '\n' => try self.output.appendSlice(self.allocator, "\\n"),
-                        '\r' => try self.output.appendSlice(self.allocator, "\\r"),
-                        '\t' => try self.output.appendSlice(self.allocator, "\\t"),
-                        else => try self.output.writer(self.allocator).print("{c}", .{c}),
-                    }
-                }
-                try self.output.appendSlice(self.allocator, "\"");
-            },
-        }
-    }
-
-    fn genBinOp(self: *NativeCodegen, binop: ast.Node.BinOp) CodegenError!void {
-        try self.output.appendSlice(self.allocator, "(");
-        try self.genExpr(binop.left.*);
-
-        const op_str = switch (binop.op) {
-            .Add => " + ",
-            .Sub => " - ",
-            .Mult => " * ",
-            .Div => " / ",
-            .Mod => " % ",
-            .FloorDiv => " / ",  // Zig doesn't distinguish
-            else => " ? ",
-        };
-        try self.output.appendSlice(self.allocator, op_str);
-
-        try self.genExpr(binop.right.*);
-        try self.output.appendSlice(self.allocator, ")");
-    }
-
-    fn genUnaryOp(self: *NativeCodegen, unaryop: ast.Node.UnaryOp) CodegenError!void {
-        const op_str = switch (unaryop.op) {
-            .Not => "!",
-            .USub => "-",
-            else => "?",
-        };
-        try self.output.appendSlice(self.allocator, op_str);
-        try self.genExpr(unaryop.operand.*);
-    }
-
-    fn genCompare(self: *NativeCodegen, compare: ast.Node.Compare) CodegenError!void {
-        try self.genExpr(compare.left.*);
-
-        for (compare.ops, 0..) |op, i| {
-            const op_str = switch (op) {
-                .Eq => " == ",
-                .NotEq => " != ",
-                .Lt => " < ",
-                .LtEq => " <= ",
-                .Gt => " > ",
-                .GtEq => " >= ",
-                else => " ? ",
-            };
-            try self.output.appendSlice(self.allocator, op_str);
-            try self.genExpr(compare.comparators[i]);
-        }
-    }
-
-    fn genBoolOp(self: *NativeCodegen, boolop: ast.Node.BoolOp) CodegenError!void {
-        const op_str = if (boolop.op == .And) " and " else " or ";
-
-        for (boolop.values, 0..) |value, i| {
-            if (i > 0) try self.output.appendSlice(self.allocator, op_str);
-            try self.genExpr(value);
-        }
-    }
-
-    fn genCall(self: *NativeCodegen, call: ast.Node.Call) CodegenError!void {
-        // Try to dispatch to specialized handler
-        const dispatched = try dispatch.dispatchCall(self, call);
-        if (dispatched) return;
-
-        // Fallback: regular function call
-        if (call.func.* == .name) {
-            const func_name = call.func.name.id;
-            try self.output.appendSlice(self.allocator, func_name);
-            try self.output.appendSlice(self.allocator, "(");
-
-            for (call.args, 0..) |arg, i| {
-                if (i > 0) try self.output.appendSlice(self.allocator, ", ");
-                try self.genExpr(arg);
-            }
-
-            try self.output.appendSlice(self.allocator, ")");
-        }
-    }
-
-
-    fn genList(self: *NativeCodegen, list: ast.Node.List) CodegenError!void {
-        // Empty lists become ArrayList for dynamic growth
-        if (list.elts.len == 0) {
-            try self.output.appendSlice(self.allocator, "std.ArrayList(i64){}");
-            return;
-        }
-
-        // Non-empty lists are fixed arrays
-        try self.output.appendSlice(self.allocator, "&[_]");
-
-        // Infer element type
-        const elem_type = try self.type_inferrer.inferExpr(list.elts[0]);
-
-        try elem_type.toZigType(self.allocator, &self.output);
-
-        try self.output.appendSlice(self.allocator, "{");
-
-        for (list.elts, 0..) |elem, i| {
-            if (i > 0) try self.output.appendSlice(self.allocator, ", ");
-            try self.genExpr(elem);
-        }
-
-        try self.output.appendSlice(self.allocator, "}");
-    }
-
-    fn genDict(self: *NativeCodegen, dict: ast.Node.Dict) CodegenError!void {
-        // Infer value type from first value
-        const val_type = if (dict.values.len > 0)
-            try self.type_inferrer.inferExpr(dict.values[0])
-        else
-            .unknown;
-
-        // Generate: blk: {
-        //   var map = std.StringHashMap(T).init(allocator);
-        //   try map.put("key", value);
-        //   break :blk map;
-        // }
-
-        try self.output.appendSlice(self.allocator, "blk: {\n");
-        self.indent();
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "var map = std.StringHashMap(");
-        try val_type.toZigType(self.allocator, &self.output);
-        try self.output.appendSlice(self.allocator, ").init(allocator);\n");
-
-        // Add all key-value pairs
-        for (dict.keys, dict.values) |key, value| {
-            try self.emitIndent();
-            try self.output.appendSlice(self.allocator, "try map.put(");
-            try self.genExpr(key);
-            try self.output.appendSlice(self.allocator, ", ");
-            try self.genExpr(value);
-            try self.output.appendSlice(self.allocator, ");\n");
-        }
-
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "break :blk map;\n");
-        self.dedent();
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "}");
-    }
-
-    fn genSubscript(self: *NativeCodegen, subscript: ast.Node.Subscript) CodegenError!void {
-        try self.genExpr(subscript.value.*);
-        try self.output.appendSlice(self.allocator, "[");
-
-        switch (subscript.slice) {
-            .index => |idx| try self.genExpr(idx.*),
-            else => {},  // TODO: Slice support
-        }
-
-        try self.output.appendSlice(self.allocator, "]");
-    }
-
-    fn emit(self: *NativeCodegen, s: []const u8) CodegenError!void {
+    // Helper functions - public for use by statements.zig and expressions.zig
+    pub fn emit(self: *NativeCodegen, s: []const u8) CodegenError!void {
         try self.output.appendSlice(self.allocator, s);
     }
 
-    fn emitIndent(self: *NativeCodegen) CodegenError!void {
+    pub fn emitIndent(self: *NativeCodegen) CodegenError!void {
         var i: usize = 0;
         while (i < self.indent_level) : (i += 1) {
             try self.output.appendSlice(self.allocator, "    ");
         }
     }
 
-    fn indent(self: *NativeCodegen) void {
+    pub fn indent(self: *NativeCodegen) void {
         self.indent_level += 1;
     }
 
-    fn dedent(self: *NativeCodegen) void {
+    pub fn dedent(self: *NativeCodegen) void {
         self.indent_level -= 1;
     }
 };
