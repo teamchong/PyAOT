@@ -189,6 +189,12 @@ pub fn genExprStmt(self: *NativeCodegen, expr: ast.Node) CodegenError!void {
         }
     }
 
+    // Discard string constants (docstrings) by assigning to _
+    // Zig requires all non-void values to be used
+    if (expr == .constant and expr.constant.value == .string) {
+        try self.output.appendSlice(self.allocator, "_ = ");
+    }
+
     try self.genExpr(expr);
     try self.output.appendSlice(self.allocator, ";\n");
 }
