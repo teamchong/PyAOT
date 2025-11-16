@@ -89,15 +89,14 @@ pub fn genBool(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
 
 /// Generate code for enumerate(iterable)
 /// Returns: iterator with (index, value) tuples
-/// Note: enumerate() is best handled in for-loop context by statements.zig
+/// Note: enumerate() is ONLY supported in for-loop context by statements.zig
 /// Standalone usage not supported in native codegen
 pub fn genEnumerate(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
     _ = args;
+    // enumerate() only works in for-loops: for i, item in enumerate(items)
     // Standalone enumerate() not supported
-    // Use: for i in range(len(items)): print(i, items[i])
-    // Or implement enumerate support in for-loop generation
     try self.output.appendSlice(self.allocator,
-        "@compileError(\"enumerate() not supported - use range(len(x)) with indexing\")");
+        "@compileError(\"enumerate() only supported in for-loops: for i, item in enumerate(...)\")");
 }
 
 /// Generate code for zip(iter1, iter2, ...)
@@ -106,11 +105,9 @@ pub fn genEnumerate(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
 /// Standalone usage not supported in native codegen
 pub fn genZip(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
     _ = args;
-    // Standalone zip() not supported
-    // Use: for i in range(min(len(a), len(b))): print(a[i], b[i])
-    // Or implement zip support in for-loop generation
+    // zip() is only supported in for-loops, not as a standalone expression
     try self.output.appendSlice(self.allocator,
-        "@compileError(\"zip() not supported - use range(min(len(a), len(b))) with indexing\")");
+        "@compileError(\"zip() only supported in for-loops: for x, y in zip(list1, list2)\")");
 }
 
 /// Generate code for abs(n)
