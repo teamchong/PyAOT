@@ -283,8 +283,15 @@ pub fn genCopy(self: *NativeCodegen, obj: ast.Node, args: []ast.Node) CodegenErr
 
 /// Generate code for dict.get(key, default)
 /// Returns value if key exists, otherwise returns default (or null if no default)
+/// If no args, generates generic method call (for custom class methods)
 pub fn genGet(self: *NativeCodegen, obj: ast.Node, args: []ast.Node) CodegenError!void {
-    if (args.len == 0) return; // Need at least one arg (the key)
+    if (args.len == 0) {
+        // Not a dict.get() - must be custom class method with no args
+        // Generate generic method call: obj.get()
+        try self.genExpr(obj);
+        try self.output.appendSlice(self.allocator, ".get()");
+        return;
+    }
 
     const default_val = if (args.len >= 2) args[1] else null;
 
