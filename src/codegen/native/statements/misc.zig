@@ -25,6 +25,34 @@ fn flattenConcat(self: *NativeCodegen, node: ast.Node, parts: *std.ArrayList(ast
     try parts.append(self.allocator, node);
 }
 
+/// Check if a node is an allocating method call (e.g., "text".upper())
+fn isAllocatingMethodCall(self: *NativeCodegen, node: ast.Node) bool {
+    if (node != .call) return false;
+    const call = node.call;
+    if (call.func.* != .attribute) return false;
+
+    const attr = call.func.attribute;
+    const obj_type = self.type_inferrer.inferExpr(attr.value.*) catch return false;
+
+    if (obj_type == .string) {
+        const allocating_methods = [_][]const u8{
+            "upper",
+            "lower",
+            "strip",
+            "lstrip",
+            "rstrip",
+            "replace",
+            "capitalize",
+            "title",
+            "swapcase",
+        };
+        for (allocating_methods) |method| {
+            if (std.mem.eql(u8, attr.attr, method)) return true;
+        }
+    }
+    return false;
+}
+
 /// Generate return statement
 pub fn genReturn(self: *NativeCodegen, ret: ast.Node.Return) CodegenError!void {
     try self.emitIndent();
@@ -62,8 +90,9 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
         return;
     }
 
-    // Check if any arg is string concatenation (needs temp var + defer)
+    // Check if any arg is string concatenation or allocating method call
     var has_string_concat = false;
+    var has_allocating_call = false;
     for (args) |arg| {
         if (arg == .binop and arg.binop.op == .Add) {
             const left_type = try self.type_inferrer.inferExpr(arg.binop.left.*);
@@ -73,16 +102,20 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
                 break;
             }
         }
+        if (isAllocatingMethodCall(self, arg)) {
+            has_allocating_call = true;
+        }
     }
 
-    // If we have string concatenation, wrap in block with temp vars
-    if (has_string_concat) {
+    // If we have string concatenation or allocating calls, wrap in block with temp vars
+    if (has_string_concat or has_allocating_call) {
         try self.output.appendSlice(self.allocator, "{\n");
         self.indent();
 
-        // Create temp vars for each concatenation
+        // Create temp vars for each concatenation or allocating method call
         var temp_counter: usize = 0;
         for (args) |arg| {
+            // Handle string concatenation
             if (arg == .binop and arg.binop.op == .Add) {
                 const left_type = try self.type_inferrer.inferExpr(arg.binop.left.*);
                 const right_type = try self.type_inferrer.inferExpr(arg.binop.right.*);
@@ -106,6 +139,16 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
                     try self.output.writer(self.allocator).print("defer allocator.free(_temp{d});\n", .{temp_counter});
                     temp_counter += 1;
                 }
+            }
+            // Handle allocating method calls
+            else if (isAllocatingMethodCall(self, arg)) {
+                try self.emitIndent();
+                try self.output.writer(self.allocator).print("const _temp{d}: []const u8 = ", .{temp_counter});
+                try self.genExpr(arg);
+                try self.output.appendSlice(self.allocator, ";\n");
+                try self.emitIndent();
+                try self.output.writer(self.allocator).print("defer allocator.free(_temp{d});\n", .{temp_counter});
+                temp_counter += 1;
             }
         }
 
@@ -132,9 +175,10 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
 
         try self.output.appendSlice(self.allocator, "\\n\", .{");
 
-        // Generate arguments (use temp vars for concat)
+        // Generate arguments (use temp vars for concat and allocating calls)
         temp_counter = 0;
         for (args, 0..) |arg, i| {
+            // Use temp var for string concatenation
             if (arg == .binop and arg.binop.op == .Add) {
                 const left_type = try self.type_inferrer.inferExpr(arg.binop.left.*);
                 const right_type = try self.type_inferrer.inferExpr(arg.binop.right.*);
@@ -144,6 +188,11 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
                 } else {
                     try self.genExpr(arg);
                 }
+            }
+            // Use temp var for allocating method calls
+            else if (isAllocatingMethodCall(self, arg)) {
+                try self.output.writer(self.allocator).print("_temp{d}", .{temp_counter});
+                temp_counter += 1;
             } else {
                 try self.genExpr(arg);
             }

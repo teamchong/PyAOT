@@ -27,14 +27,25 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
             // Check if value allocates memory
             const is_allocated_string = blk: {
                 if (assign.value.* == .call) {
-                    // Method calls that allocate: upper(), lower(), replace()
+                    // String method calls that allocate new strings
                     if (assign.value.call.func.* == .attribute) {
-                        const method_name = assign.value.call.func.attribute.attr;
-                        if (std.mem.eql(u8, method_name, "upper") or
-                            std.mem.eql(u8, method_name, "lower") or
-                            std.mem.eql(u8, method_name, "replace"))
-                        {
-                            break :blk true;
+                        const attr = assign.value.call.func.attribute;
+                        const obj_type = self.type_inferrer.inferExpr(attr.value.*) catch break :blk false;
+
+                        if (obj_type == .string) {
+                            const method_name = attr.attr;
+                            // All string methods that allocate and return new strings
+                            const allocating_methods = [_][]const u8{
+                                "upper", "lower", "strip", "lstrip", "rstrip",
+                                "replace", "capitalize", "title", "swapcase",
+                                "center", "ljust", "rjust", "join",
+                            };
+
+                            for (allocating_methods) |method| {
+                                if (std.mem.eql(u8, method_name, method)) {
+                                    break :blk true;
+                                }
+                            }
                         }
                     }
                     // Built-in functions that allocate: sorted(), reversed()
