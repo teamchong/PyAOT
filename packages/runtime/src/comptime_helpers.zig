@@ -9,11 +9,11 @@ pub fn InferListType(comptime TupleType: type) type {
     const type_info = @typeInfo(TupleType);
 
     // Must be a tuple (anonymous struct)
-    if (type_info != .Struct) {
+    if (type_info != .@"struct") {
         @compileError("InferListType expects a tuple type");
     }
 
-    const fields = type_info.Struct.fields;
+    const fields = type_info.@"struct".fields;
     if (fields.len == 0) {
         return i64; // Default empty list type
     }
@@ -26,8 +26,8 @@ pub fn InferListType(comptime TupleType: type) type {
     inline for (fields) |field| {
         const T = field.type;
 
-        // Check for float types
-        if (T == f64 or T == f32 or T == f16) {
+        // Check for float types (including comptime_float!)
+        if (T == f64 or T == f32 or T == f16 or T == comptime_float) {
             has_float = true;
         }
         // Check for string types
