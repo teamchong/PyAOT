@@ -185,11 +185,12 @@ pub const TypeInferrer = struct {
                 const obj_type = try self.inferExpr(s.value.*);
 
                 switch (s.slice) {
-                    .index => {
+                    .index => |idx| {
                         // Single index access
                         // string[i] -> u8 (but we treat as string for printing)
                         // list[i] -> element type
                         // dict[key] -> value type
+                        // tuple[i] -> element type at index i
                         if (obj_type == .string) {
                             // String indexing returns a single character
                             // For now, treat as string for simplicity
@@ -198,6 +199,16 @@ pub const TypeInferrer = struct {
                             break :blk obj_type.list.*;
                         } else if (obj_type == .dict) {
                             break :blk obj_type.dict.value.*;
+                        } else if (obj_type == .tuple) {
+                            // Try to get constant index
+                            if (idx.* == .constant and idx.constant.value == .int) {
+                                const index = @as(usize, @intCast(idx.constant.value.int));
+                                if (index < obj_type.tuple.len) {
+                                    break :blk obj_type.tuple[index];
+                                }
+                            }
+                            // If we can't determine constant index, return unknown
+                            break :blk .unknown;
                         } else {
                             break :blk .unknown;
                         }
@@ -264,6 +275,14 @@ pub const TypeInferrer = struct {
                     .key = &.string,
                     .value = val_ptr,
                 } };
+            },
+            .tuple => |t| blk: {
+                // Infer types of all tuple elements
+                var elem_types = try self.allocator.alloc(NativeType, t.elts.len);
+                for (t.elts, 0..) |elt, i| {
+                    elem_types[i] = try self.inferExpr(elt);
+                }
+                break :blk .{ .tuple = elem_types };
             },
             else => .unknown,
         };

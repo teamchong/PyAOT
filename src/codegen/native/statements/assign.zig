@@ -98,11 +98,12 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
                 }
                 try self.output.appendSlice(self.allocator, var_name);
 
-                // Only emit type annotation for known types that aren't dicts, lists, or ArrayLists
-                // For lists/ArrayLists/dicts, let Zig infer the type from the initializer
+                // Only emit type annotation for known types that aren't dicts, lists, tuples, or ArrayLists
+                // For lists/ArrayLists/dicts/tuples, let Zig infer the type from the initializer
                 // For unknown types (json.loads, etc.), let Zig infer
                 const is_list = (value_type == .list);
-                if (value_type != .unknown and !is_dict and !is_arraylist and !is_list) {
+                const is_tuple = (value_type == .tuple);
+                if (value_type != .unknown and !is_dict and !is_arraylist and !is_list and !is_tuple) {
                     try self.output.appendSlice(self.allocator, ": ");
                     try value_type.toZigType(self.allocator, &self.output);
                 }

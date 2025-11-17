@@ -5,23 +5,31 @@ const CodegenError = @import("main.zig").CodegenError;
 const NativeCodegen = @import("main.zig").NativeCodegen;
 
 /// Generate code for len(obj)
-/// Works with: strings, lists, dicts
+/// Works with: strings, lists, dicts, tuples
 pub fn genLen(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
     if (args.len != 1) {
         // TODO: Error handling
         return;
     }
 
-    // Check if argument is ArrayList (detected as .list type)
+    // Check if argument is ArrayList (detected as .list type) or tuple
     const arg_type = self.type_inferrer.inferExpr(args[0]) catch .unknown;
     const is_arraylist = (arg_type == .list);
+    const is_tuple = (arg_type == .tuple);
 
     // Generate: obj.items.len for ArrayList, obj.len for slices/arrays
-    try self.genExpr(args[0]);
-    if (is_arraylist) {
-        try self.output.appendSlice(self.allocator, ".items.len");
+    // For tuples, use @typeInfo to get field count at compile time
+    if (is_tuple) {
+        try self.output.appendSlice(self.allocator, "@typeInfo(@TypeOf(");
+        try self.genExpr(args[0]);
+        try self.output.appendSlice(self.allocator, ")).@\"struct\".fields.len");
     } else {
-        try self.output.appendSlice(self.allocator, ".len");
+        try self.genExpr(args[0]);
+        if (is_arraylist) {
+            try self.output.appendSlice(self.allocator, ".items.len");
+        } else {
+            try self.output.appendSlice(self.allocator, ".len");
+        }
     }
 }
 

@@ -90,9 +90,10 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
         return;
     }
 
-    // Check if any arg is string concatenation or allocating method call
+    // Check if any arg is string concatenation, allocating method call, or list
     var has_string_concat = false;
     var has_allocating_call = false;
+    var has_list = false;
     for (args) |arg| {
         if (arg == .binop and arg.binop.op == .Add) {
             const left_type = try self.type_inferrer.inferExpr(arg.binop.left.*);
@@ -105,6 +106,53 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
         if (isAllocatingMethodCall(self, arg)) {
             has_allocating_call = true;
         }
+        const arg_type = try self.type_inferrer.inferExpr(arg);
+        if (arg_type == .list) {
+            has_list = true;
+        }
+    }
+
+    // If we have lists, handle them specially with custom formatting
+    if (has_list) {
+        // For lists, we need to print in Python format: [elem1, elem2, ...]
+        for (args, 0..) |arg, i| {
+            const arg_type = try self.type_inferrer.inferExpr(arg);
+            if (arg_type == .list) {
+                // Generate loop to print list elements
+                try self.output.appendSlice(self.allocator, "{\n");
+                try self.output.appendSlice(self.allocator, "    const __list = ");
+                try self.genExpr(arg);
+                try self.output.appendSlice(self.allocator, ";\n");
+                try self.output.appendSlice(self.allocator, "    std.debug.print(\"[\", .{});\n");
+                try self.output.appendSlice(self.allocator, "    for (__list, 0..) |__elem, __idx| {\n");
+                try self.output.appendSlice(self.allocator, "        if (__idx > 0) std.debug.print(\", \", .{});\n");
+                try self.output.appendSlice(self.allocator, "        std.debug.print(\"{d}\", .{__elem});\n");
+                try self.output.appendSlice(self.allocator, "    }\n");
+                try self.output.appendSlice(self.allocator, "    std.debug.print(\"]\", .{});\n");
+                try self.output.appendSlice(self.allocator, "}\n");
+            } else {
+                // For non-list args in mixed print, use std.debug.print
+                try self.output.appendSlice(self.allocator, "std.debug.print(\"");
+                const fmt = switch (arg_type) {
+                    .int => "{d}",
+                    .float => "{d}",
+                    .bool => "{}",
+                    .string => "{s}",
+                    else => "{any}",
+                };
+                try self.output.appendSlice(self.allocator, fmt);
+                try self.output.appendSlice(self.allocator, "\", .{");
+                try self.genExpr(arg);
+                try self.output.appendSlice(self.allocator, "});\n");
+            }
+            // Print space between args (except last)
+            if (i < args.len - 1) {
+                try self.output.appendSlice(self.allocator, "std.debug.print(\" \", .{});\n");
+            }
+        }
+        // Print newline at end
+        try self.output.appendSlice(self.allocator, "std.debug.print(\"\\n\", .{});\n");
+        return;
     }
 
     // If we have string concatenation or allocating calls, wrap in block with temp vars
