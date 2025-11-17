@@ -151,7 +151,21 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
                         if (elem_idx > 0) {
                             try self.output.appendSlice(self.allocator, "    std.debug.print(\", \", .{});\n");
                         }
-                        try self.output.writer(self.allocator).print("    std.debug.print(\"{{d}}\", .{{__tuple.@\"{d}\"}});\n", .{elem_idx});
+                        // Determine format based on element type
+                        const elem_type = arg_type.tuple[elem_idx];
+                        const fmt = switch (elem_type) {
+                            .int => "{d}",
+                            .float => "{d}",
+                            .bool => "{s}",
+                            .string => "{s}",
+                            else => "{any}",
+                        };
+                        if (elem_type == .bool) {
+                            // Boolean elements need conditional formatting
+                            try self.output.writer(self.allocator).print("    std.debug.print(\"{{s}}\", .{{if (__tuple.@\"{d}\") \"True\" else \"False\"}});\n", .{elem_idx});
+                        } else {
+                            try self.output.writer(self.allocator).print("    std.debug.print(\"{s}\", .{{__tuple.@\"{d}\"}});\n", .{ fmt, elem_idx });
+                        }
                     }
                 }
                 try self.output.appendSlice(self.allocator, "    std.debug.print(\")\", .{});\n");
