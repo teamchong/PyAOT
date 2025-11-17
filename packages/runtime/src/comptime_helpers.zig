@@ -3,6 +3,21 @@
 
 const std = @import("std");
 
+/// Check if a type is a string literal (*const [N:0]u8)
+fn isStringLiteral(comptime T: type) bool {
+    const info = @typeInfo(T);
+    if (info == .pointer) {
+        const ptr = info.pointer;
+        if (ptr.size == .one and ptr.is_const) {
+            const child_info = @typeInfo(ptr.child);
+            if (child_info == .array) {
+                return child_info.array.child == u8 and child_info.array.sentinel_ptr != null;
+            }
+        }
+    }
+    return false;
+}
+
 /// Infer the best ArrayList element type from a comptime-known tuple of values
 /// Follows Python's type promotion hierarchy: int < float < string
 pub fn InferListType(comptime TupleType: type) type {
@@ -130,7 +145,7 @@ pub fn InferDictValueType(comptime TupleType: type) type {
         // Check value type
         if (V == f64 or V == f32 or V == f16 or V == comptime_float) {
             has_float = true;
-        } else if (V == []const u8 or V == []u8) {
+        } else if (V == []const u8 or V == []u8 or isStringLiteral(V)) {
             has_string = true;
         }
     }

@@ -4,6 +4,16 @@ const ast = @import("../../../ast.zig");
 const NativeCodegen = @import("../main.zig").NativeCodegen;
 const CodegenError = @import("../main.zig").CodegenError;
 
+/// Check if a node is a compile-time constant (can use comptime)
+fn isComptimeConstant(node: ast.Node) bool {
+    return switch (node) {
+        .constant => true,
+        .unaryop => |u| isComptimeConstant(u.operand.*),
+        .binop => |b| isComptimeConstant(b.left.*) and isComptimeConstant(b.right.*),
+        else => false,
+    };
+}
+
 /// Check if an expression contains a reference to a variable name
 /// Used to detect self-referencing assignments like: x = x + 1
 fn valueContainsName(node: ast.Node, name: []const u8) bool {
@@ -67,14 +77,21 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
     if (assign.targets.len == 1 and assign.targets[0] == .tuple) {
         const target_tuple = assign.targets[0].tuple;
 
-        // Generate: const __unpack_tmp = value_expr;
+        // Generate unique temporary variable name
+        const tmp_name = try std.fmt.allocPrint(self.allocator, "__unpack_tmp_{d}", .{self.unpack_counter});
+        defer self.allocator.free(tmp_name);
+        self.unpack_counter += 1;
+
+        // Generate: const __unpack_tmp_N = value_expr;
         try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "const __unpack_tmp = ");
+        try self.output.appendSlice(self.allocator, "const ");
+        try self.output.appendSlice(self.allocator, tmp_name);
+        try self.output.appendSlice(self.allocator, " = ");
         try self.genExpr(assign.value.*);
         try self.output.appendSlice(self.allocator, ";\n");
 
-        // Generate: const a = __unpack_tmp.@"0";
-        //           const b = __unpack_tmp.@"1";
+        // Generate: const a = __unpack_tmp_N.@"0";
+        //           const b = __unpack_tmp_N.@"1";
         for (target_tuple.elts, 0..) |target, i| {
             if (target == .name) {
                 const var_name = target.name.id;
@@ -86,7 +103,7 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
                     try self.declareVar(var_name);
                 }
                 try self.output.appendSlice(self.allocator, var_name);
-                try self.output.writer(self.allocator).print(" = __unpack_tmp.@\"{d}\";\n", .{i});
+                try self.output.writer(self.allocator).print(" = {s}.@\"{d}\";\n", .{ tmp_name, i });
             }
         }
         return;
@@ -239,21 +256,73 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
                 try self.output.writer(self.allocator).print("defer {s}.deinit(allocator);\n", .{var_name});
             }
             if (is_first_assignment and is_dict) {
-                // Check if dict has mixed types (which means string values with allocations)
-                const has_mixed_types = blk: {
-                    if (assign.value.dict.values.len == 0) break :blk false;
+                // Check if dict will use comptime path (all constants AND compatible types)
+                // Must match the logic in collections.zig to avoid mismatch!
+                var is_comptime_dict = true;
+                for (assign.value.dict.keys) |key| {
+                    if (!isComptimeConstant(key)) {
+                        is_comptime_dict = false;
+                        break;
+                    }
+                }
+                if (is_comptime_dict) {
+                    for (assign.value.dict.values) |value| {
+                        if (!isComptimeConstant(value)) {
+                            is_comptime_dict = false;
+                            break;
+                        }
+                    }
+                }
+
+                // Even if all constants, check type compatibility (matches collections.zig logic)
+                if (is_comptime_dict and assign.value.dict.values.len > 0) {
                     const first_type = try self.type_inferrer.inferExpr(assign.value.dict.values[0]);
                     for (assign.value.dict.values[1..]) |value| {
                         const this_type = try self.type_inferrer.inferExpr(value);
-                        if (@as(std.meta.Tag(@TypeOf(first_type)), first_type) != @as(std.meta.Tag(@TypeOf(this_type)), this_type)) {
+                        const tags_match = @as(std.meta.Tag(@TypeOf(first_type)), first_type) ==
+                                          @as(std.meta.Tag(@TypeOf(this_type)), this_type);
+                        const is_int_float_mix = (first_type == .int and this_type == .float) or
+                                                 (first_type == .float and this_type == .int);
+                        if (!tags_match and !is_int_float_mix) {
+                            // Mixed types → will use runtime path → NOT comptime!
+                            is_comptime_dict = false;
+                            break;
+                        }
+                    }
+                }
+
+                // Check if dict needs complex cleanup (string values that were allocated)
+                // Comptime dicts use string literals (no allocation) → simple cleanup
+                // Runtime dicts with mixed types convert to strings → need value freeing
+                const needs_value_cleanup = blk: {
+                    std.debug.print("DEBUG: is_comptime_dict={}\n", .{is_comptime_dict});
+                    if (is_comptime_dict) break :blk false;  // Comptime dicts never need value cleanup
+                    if (assign.value.dict.values.len == 0) break :blk false;
+
+                    // Check if values have different types (will be widened to string)
+                    const first_type = try self.type_inferrer.inferExpr(assign.value.dict.values[0]);
+                    std.debug.print("DEBUG: first_type={}\n", .{first_type});
+                    for (assign.value.dict.values[1..]) |value| {
+                        const this_type = try self.type_inferrer.inferExpr(value);
+                        std.debug.print("DEBUG: this_type={}\n", .{this_type});
+                        // Direct enum tag comparison
+                        const first_tag = @as(std.meta.Tag(@TypeOf(first_type)), first_type);
+                        const this_tag = @as(std.meta.Tag(@TypeOf(this_type)), this_type);
+                        std.debug.print("DEBUG: first_tag={}, this_tag={}, equal={}\n", .{first_tag, this_tag, first_tag == this_tag});
+                        if (first_tag != this_tag) {
+                            // Different types → runtime path will allocate strings
+                            std.debug.print("DEBUG: needs_value_cleanup=TRUE\n", .{});
                             break :blk true;
                         }
                     }
+
+                    // All same type → no value cleanup needed
+                    std.debug.print("DEBUG: needs_value_cleanup=FALSE (same types)\n", .{});
                     break :blk false;
                 };
 
-                // If mixed types, need to free string values before deinit
-                if (has_mixed_types) {
+                // If needs value cleanup, free all string values before deinit
+                if (needs_value_cleanup) {
                     try self.emitIndent();
                     try self.output.writer(self.allocator).print("defer {{\n", .{});
                     self.indent();

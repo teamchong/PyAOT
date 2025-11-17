@@ -181,7 +181,24 @@ pub fn genDict(self: *NativeCodegen, dict: ast.Node.Dict) CodegenError!void {
         }
     }
 
-    // COMPTIME PATH: All entries known at compile time
+    // Check if values have compatible types (no mixed types that need runtime conversion)
+    // Only int/float widening is allowed for comptime path
+    if (all_comptime and dict.values.len > 0) {
+        const first_type = try self.type_inferrer.inferExpr(dict.values[0]);
+        for (dict.values[1..]) |value| {
+            const this_type = try self.type_inferrer.inferExpr(value);
+            // Check if types are incompatible (e.g., string + int)
+            const tags_match = @as(std.meta.Tag(@TypeOf(first_type)), first_type) == @as(std.meta.Tag(@TypeOf(this_type)), this_type);
+            const is_int_float_mix = (first_type == .int and this_type == .float) or (first_type == .float and this_type == .int);
+            if (!tags_match and !is_int_float_mix) {
+                // Mixed types that need runtime conversion - fall back to runtime path
+                all_comptime = false;
+                break;
+            }
+        }
+    }
+
+    // COMPTIME PATH: All entries known at compile time AND have compatible types
     if (all_comptime) {
         const label = try std.fmt.allocPrint(self.allocator, "dict_{d}", .{@intFromPtr(dict.keys.ptr)});
         defer self.allocator.free(label);
@@ -233,6 +250,30 @@ pub fn genDict(self: *NativeCodegen, dict: ast.Node.Dict) CodegenError!void {
         self.indent();
         try self.emitIndent();
         try self.output.appendSlice(self.allocator, "break :cast_blk @as(f64, kv[1]);\n");
+        self.dedent();
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "}\n");
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "if (V == []const u8) {\n");
+        self.indent();
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "const kv_type_info = @typeInfo(@TypeOf(kv[1]));\n");
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "if (kv_type_info == .pointer and kv_type_info.pointer.size == .one) {\n");
+        self.indent();
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "const child = @typeInfo(kv_type_info.pointer.child);\n");
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "if (child == .array and child.array.child == u8) {\n");
+        self.indent();
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "break :cast_blk @as([]const u8, kv[1]);\n");
+        self.dedent();
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "}\n");
+        self.dedent();
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "}\n");
         self.dedent();
         try self.emitIndent();
         try self.output.appendSlice(self.allocator, "}\n");

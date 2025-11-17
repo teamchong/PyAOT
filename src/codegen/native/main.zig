@@ -37,6 +37,9 @@ pub const NativeCodegen = struct {
     // Class registry for inheritance support - maps class name to ClassDef
     classes: std.StringHashMap(ast.Node.ClassDef),
 
+    // Counter for unique tuple unpacking temporary variables
+    unpack_counter: usize,
+
     pub fn init(allocator: std.mem.Allocator, type_inferrer: *TypeInferrer, semantic_info: *SemanticInfo) !*NativeCodegen {
         const self = try allocator.create(NativeCodegen);
         var scopes = std.ArrayList(std.StringHashMap(void)){};
@@ -53,6 +56,7 @@ pub const NativeCodegen = struct {
             .indent_level = 0,
             .scopes = scopes,
             .classes = std.StringHashMap(ast.Node.ClassDef).init(allocator),
+            .unpack_counter = 0,
         };
         return self;
     }
