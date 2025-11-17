@@ -9,7 +9,7 @@
 ### Queue System (957 lines)
 
 **Lock-free circular buffer queue (Tokio design):**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/queue/lockfree.zig` (291 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/queue/lockfree.zig` (291 lines)
   - Atomic head/tail pointers
   - Power-of-2 capacity optimization
   - Push, pop, steal operations
@@ -17,14 +17,14 @@
   - 6 comprehensive tests
 
 **Local queue (per-processor):**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/queue/local.zig` (235 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/queue/local.zig` (235 lines)
   - 256-slot capacity
   - Statistics tracking
   - Processor-local operations
   - 5 tests
 
 **Global overflow queue:**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/queue/global.zig` (313 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/queue/global.zig` (313 lines)
   - Unbounded linked-list design
   - Mutex-protected operations
   - Batch push/pop support
@@ -33,7 +33,7 @@
 ### Preemption System (628 lines)
 
 **Preemption timer:**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/preempt/timer.zig` (216 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/preempt/timer.zig` (216 lines)
   - Background thread monitoring
   - 10ms interval checking
   - Automatic task preemption
@@ -41,7 +41,7 @@
   - 3 tests
 
 **Signal handling:**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/preempt/signals.zig` (155 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/preempt/signals.zig` (155 lines)
   - SIGURG on Unix systems
   - Cooperative fallback
   - Platform detection
@@ -49,7 +49,7 @@
   - 3 tests
 
 **Stack switching:**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/preempt/stack.zig` (257 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/preempt/stack.zig` (257 lines)
   - Platform-specific context save/restore
   - x86_64 and ARM64 support
   - Stack allocation (page-aligned)
@@ -59,21 +59,21 @@
 ### Tests & Benchmarks (620 lines)
 
 **Queue integration tests:**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/test_queue.zig` (138 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/test_queue.zig` (138 lines)
   - Lock-free queue tests
   - Local queue tests
   - Global queue tests
   - All tests passing ✓
 
 **Preemption integration tests:**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/test_preempt.zig` (156 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/test_preempt.zig` (156 lines)
   - Signal handling tests
   - Stack operations tests
   - Preemption timer tests
   - All tests passing ✓
 
 **Performance benchmarks:**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/benchmark_queues.zig` (126 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/benchmark_queues.zig` (126 lines)
   - 1M iterations per benchmark
   - Push/pop, steal, mixed operations
   - ReleaseFast optimization
@@ -82,7 +82,7 @@
 ### Supporting Files
 
 **Task definition:**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/task.zig` (265 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/task.zig` (265 lines)
   - Enhanced by another agent with:
     - Task states (idle, runnable, running, waiting, dead)
     - Priority levels
@@ -91,7 +91,7 @@
     - Preemption flags
 
 **Processor definition:**
-- `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/async/processor.zig` (210 lines)
+- `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/async/processor.zig` (210 lines)
   - Enhanced by another agent with:
     - State management
     - Local queue integration

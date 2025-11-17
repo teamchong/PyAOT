@@ -33,7 +33,7 @@ json/
 
 ### Public API
 
-Location: `/Users/steven_chong/Downloads/repos/pyaot/packages/runtime/src/json.zig`
+Location: `/Users/steven_chong/Downloads/repos/PyAOT/packages/runtime/src/json.zig`
 
 ```zig
 /// Deserialize JSON string to PyObject
@@ -49,7 +49,7 @@ Exported in runtime.zig as:
 
 ### Python Integration
 
-**Codegen Integration:** Modified `/Users/steven_chong/Downloads/repos/pyaot/src/codegen/`
+**Codegen Integration:** Modified `/Users/steven_chong/Downloads/repos/PyAOT/src/codegen/`
 - `statements.zig` - Detect `import json` and skip Python FFI
 - `classes.zig` - Route `json.loads()` and `json.dumps()` to native runtime
 
