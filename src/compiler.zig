@@ -247,7 +247,7 @@ fn copyRuntimeDir(allocator: std.mem.Allocator, dir_name: []const u8) !void {
 
             const src_file = try std.fs.cwd().openFile(src_file_path, .{});
             defer src_file.close();
-            const dst_file = try std.fs.createFileAbsolute(dst_file_path, .{});
+            const dst_file = try std.fs.cwd().createFile(dst_file_path, .{});
             defer dst_file.close();
 
             const content = try src_file.readToEndAlloc(allocator, 10 * 1024 * 1024);
