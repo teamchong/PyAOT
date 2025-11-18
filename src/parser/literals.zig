@@ -101,34 +101,116 @@ pub fn parseListComp(self: *Parser, elt: ast.Node) ParseError!ast.Node {
     };
 }
 
-/// Parse dictionary literal: {key: value, ...}
+/// Parse dictionary literal: {key: value, ...} or dict comprehension: {k: v for k in items}
 pub fn parseDict(self: *Parser) ParseError!ast.Node {
     _ = try self.expect(.LBrace);
 
+    // Empty dict
+    if (self.match(.RBrace)) {
+        return ast.Node{
+            .dict = .{
+                .keys = &[_]ast.Node{},
+                .values = &[_]ast.Node{},
+            },
+        };
+    }
+
+    // Parse first key
+    const first_key = try self.parseExpression();
+    _ = try self.expect(.Colon);
+    const first_value = try self.parseExpression();
+
+    // Check if this is a dict comprehension: {k: v for k in items}
+    if (self.check(.For)) {
+        return try parseDictComp(self, first_key, first_value);
+    }
+
+    // Regular dict: collect key-value pairs
     var keys = std.ArrayList(ast.Node){};
     defer keys.deinit(self.allocator);
 
     var values = std.ArrayList(ast.Node){};
     defer values.deinit(self.allocator);
 
-    while (!self.match(.RBrace)) {
+    try keys.append(self.allocator, first_key);
+    try values.append(self.allocator, first_value);
+
+    while (self.match(.Comma)) {
+        // Allow trailing comma
+        if (self.check(.RBrace)) {
+            break;
+        }
         const key = try self.parseExpression();
         _ = try self.expect(.Colon);
         const value = try self.parseExpression();
 
         try keys.append(self.allocator, key);
         try values.append(self.allocator, value);
-
-        if (!self.match(.Comma)) {
-            _ = try self.expect(.RBrace);
-            break;
-        }
     }
+
+    _ = try self.expect(.RBrace);
 
     return ast.Node{
         .dict = .{
             .keys = try keys.toOwnedSlice(self.allocator),
             .values = try values.toOwnedSlice(self.allocator),
+        },
+    };
+}
+
+/// Parse dict comprehension: {k: v for k in items if cond} or {k: v for x in range(3) for y in range(3)}
+pub fn parseDictComp(self: *Parser, key: ast.Node, value: ast.Node) ParseError!ast.Node {
+    // We've already parsed the key and value expressions
+    // Now parse one or more: for <target> in <iter> [if <condition>]
+
+    var generators = std.ArrayList(ast.Node.Comprehension){};
+    defer generators.deinit(self.allocator);
+
+    // Parse all "for ... in ..." clauses
+    while (self.match(.For)) {
+        // Parse target as primary (just a name, not a full expression)
+        const target = try self.parsePrimary();
+        _ = try self.expect(.In);
+        const iter = try self.parseExpression();
+
+        // Parse optional if conditions for this generator
+        var ifs = std.ArrayList(ast.Node){};
+        defer ifs.deinit(self.allocator);
+
+        while (self.check(.If) and !self.check(.For)) {
+            _ = self.advance();
+            const cond = try self.parseExpression();
+            try ifs.append(self.allocator, cond);
+        }
+
+        // Allocate nodes on heap
+        const target_ptr = try self.allocator.create(ast.Node);
+        target_ptr.* = target;
+
+        const iter_ptr = try self.allocator.create(ast.Node);
+        iter_ptr.* = iter;
+
+        try generators.append(self.allocator, ast.Node.Comprehension{
+            .target = target_ptr,
+            .iter = iter_ptr,
+            .ifs = try ifs.toOwnedSlice(self.allocator),
+        });
+    }
+
+    _ = try self.expect(.RBrace);
+
+    // Allocate key and value on heap
+    const key_ptr = try self.allocator.create(ast.Node);
+    key_ptr.* = key;
+
+    const value_ptr = try self.allocator.create(ast.Node);
+    value_ptr.* = value;
+
+    return ast.Node{
+        .dictcomp = .{
+            .key = key_ptr,
+            .value = value_ptr,
+            .generators = try generators.toOwnedSlice(self.allocator),
         },
     };
 }

@@ -467,6 +467,22 @@ pub const TypeInferrer = struct {
                     .value = val_ptr,
                 } };
             },
+            .dictcomp => |dc| blk: {
+                // Infer types from key and value expressions
+                const key_type = try self.inferExpr(dc.key.*);
+                const val_type = try self.inferExpr(dc.value.*);
+
+                // Allocate key and value types on heap
+                const key_ptr = try self.allocator.create(NativeType);
+                key_ptr.* = key_type;
+                const val_ptr = try self.allocator.create(NativeType);
+                val_ptr.* = val_type;
+
+                break :blk .{ .dict = .{
+                    .key = key_ptr,
+                    .value = val_ptr,
+                } };
+            },
             .tuple => |t| blk: {
                 // Infer types of all tuple elements
                 var elem_types = try self.allocator.alloc(NativeType, t.elts.len);

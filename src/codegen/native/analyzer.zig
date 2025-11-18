@@ -258,6 +258,26 @@ fn analyzeExpr(node: ast.Node) !ModuleAnalysis {
                 }
             }
         },
+        .dictcomp => |dictcomp| {
+            // Dict comprehensions need allocator for HashMap operations
+            analysis.needs_allocator = true;
+
+            const key_analysis = try analyzeExpr(dictcomp.key.*);
+            analysis.merge(key_analysis);
+
+            const value_analysis = try analyzeExpr(dictcomp.value.*);
+            analysis.merge(value_analysis);
+
+            for (dictcomp.generators) |gen| {
+                const iter_analysis = try analyzeExpr(gen.iter.*);
+                analysis.merge(iter_analysis);
+
+                for (gen.ifs) |if_cond| {
+                    const cond_analysis = try analyzeExpr(if_cond);
+                    analysis.merge(cond_analysis);
+                }
+            }
+        },
         else => {},
     }
 

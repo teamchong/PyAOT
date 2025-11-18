@@ -309,6 +309,7 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
         try self.output.appendSlice(self.allocator, "}\n");
     } else {
         // No string concatenation - simple print
+        try self.emitIndent();
         try self.output.appendSlice(self.allocator, "std.debug.print(\"");
 
         // Generate format string

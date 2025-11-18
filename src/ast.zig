@@ -22,6 +22,7 @@ pub const Node = union(enum) {
     list: List,
     listcomp: ListComp,
     dict: Dict,
+    dictcomp: DictComp,
     tuple: Tuple,
     subscript: Subscript,
     attribute: Attribute,
@@ -142,6 +143,12 @@ pub const Node = union(enum) {
     pub const Dict = struct {
         keys: []Node,
         values: []Node,
+    };
+
+    pub const DictComp = struct {
+        key: *Node, // Key expression
+        value: *Node, // Value expression
+        generators: []Comprehension, // One or more for clauses
     };
 
     pub const Tuple = struct {
@@ -322,6 +329,21 @@ pub const Node = union(enum) {
                 allocator.free(d.keys);
                 for (d.values) |*v| v.deinit(allocator);
                 allocator.free(d.values);
+            },
+            .dictcomp => |dc| {
+                dc.key.deinit(allocator);
+                allocator.destroy(dc.key);
+                dc.value.deinit(allocator);
+                allocator.destroy(dc.value);
+                for (dc.generators) |*gen| {
+                    gen.target.deinit(allocator);
+                    allocator.destroy(gen.target);
+                    gen.iter.deinit(allocator);
+                    allocator.destroy(gen.iter);
+                    for (gen.ifs) |*f| f.deinit(allocator);
+                    allocator.free(gen.ifs);
+                }
+                allocator.free(dc.generators);
             },
             .tuple => |t| {
                 for (t.elts) |*e| e.deinit(allocator);

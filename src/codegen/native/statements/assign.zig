@@ -106,6 +106,7 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
             };
             const is_listcomp = (assign.value.* == .listcomp);
             const is_dict = (assign.value.* == .dict);
+            const is_dictcomp = (assign.value.* == .dictcomp);
             const is_class_instance = blk: {
                 if (assign.value.* == .call and assign.value.call.func.* == .name) {
                     const name = assign.value.call.func.name.id;
@@ -198,6 +199,7 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
                 const is_mutated = self.semantic_info.isMutated(var_name);
 
                 // ArrayLists, dicts, and class instances need var (for mutation and deinit)
+                // Dictcomps return immutable HashMaps, so they don't need var
                 const needs_var = is_mutated or is_arraylist or is_dict or is_class_instance;
 
                 if (needs_var) {
@@ -207,13 +209,14 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
                 }
                 try self.output.appendSlice(self.allocator, var_name);
 
-                // Only emit type annotation for known types that aren't dicts, lists, tuples, closures, or ArrayLists
-                // For lists/ArrayLists/dicts/tuples/closures, let Zig infer the type from the initializer
+                // Only emit type annotation for known types that aren't dicts, dictcomps, lists, tuples, closures, or ArrayLists
+                // For lists/ArrayLists/dicts/dictcomps/tuples/closures, let Zig infer the type from the initializer
                 // For unknown types (json.loads, etc.), let Zig infer
                 const is_list = (value_type == .list);
                 const is_tuple = (value_type == .tuple);
                 const is_closure = (value_type == .closure);
-                if (value_type != .unknown and !is_dict and !is_arraylist and !is_list and !is_tuple and !is_closure) {
+                const is_dict_type = (value_type == .dict);
+                if (value_type != .unknown and !is_dict and !is_dictcomp and !is_dict_type and !is_arraylist and !is_list and !is_tuple and !is_closure) {
                     try self.output.appendSlice(self.allocator, ": ");
                     try value_type.toZigType(self.allocator, &self.output);
                 }

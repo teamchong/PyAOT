@@ -87,12 +87,36 @@ pub fn genFor(self: *NativeCodegen, for_stmt: ast.Node.For) CodegenError!void {
     // Regular iteration over collection - requires single target variable
     const var_name = for_stmt.target.name.id;
 
+    // Check iter type first (needed for tuple special case)
+    const iter_type = try self.type_inferrer.inferExpr(for_stmt.iter.*);
+
+    // Special case: tuple iteration requires inline for (comptime)
+    if (iter_type == .tuple) {
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "inline for (");
+        try self.genExpr(for_stmt.iter.*);
+        try self.output.appendSlice(self.allocator, ") |");
+        try self.output.appendSlice(self.allocator, var_name);
+        try self.output.appendSlice(self.allocator, "| {\n");
+
+        self.indent();
+        try self.pushScope();
+
+        for (for_stmt.body) |stmt| {
+            try self.generateStmt(stmt);
+        }
+
+        self.popScope();
+        self.dedent();
+
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "}\n");
+        return;
+    }
+
     // Regular iteration over collection
     try self.emitIndent();
     try self.output.appendSlice(self.allocator, "for (");
-
-    // Add .items if it's an ArrayList
-    const iter_type = try self.type_inferrer.inferExpr(for_stmt.iter.*);
 
     // Check if this is a constant list (will be compiled to array, not ArrayList)
     const is_constant_array = blk: {

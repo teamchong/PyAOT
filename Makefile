@@ -16,12 +16,14 @@ help:
 build:
 	@echo "🔨 Building pyaot compiler (debug mode)..."
 	@command -v zig >/dev/null 2>&1 || { echo "❌ Error: zig not installed"; exit 1; }
+	@rm -rf zig-cache .zig-cache
 	zig build
 	@echo "✅ Debug binary built: zig-out/bin/pyaot"
 
 build-release:
 	@echo "🔨 Building pyaot compiler (optimized for production)..."
 	@command -v zig >/dev/null 2>&1 || { echo "❌ Error: zig not installed"; exit 1; }
+	@rm -rf zig-cache .zig-cache
 	zig build -Doptimize=ReleaseSafe
 	@echo "✅ Release binary built: zig-out/bin/pyaot"
 
