@@ -63,21 +63,44 @@ pub fn genSubscript(self: *NativeCodegen, subscript: ast.Node.Subscript) Codegen
                 try genExpr(self, subscript.slice.index.*);
                 try self.output.appendSlice(self.allocator, ").?");
             } else if (is_list) {
-                // ArrayList indexing - use inline bounds checking instead of runtime.arrayListGet
-                // to avoid needing explicit type parameters
-                if (isNegativeConstant(subscript.slice.index.*)) {
-                    // Need block for negative index handling
-                    try self.output.appendSlice(self.allocator, "blk: { const __list = ");
-                    try genExpr(self, subscript.value.*);
-                    try self.output.appendSlice(self.allocator, "; const __idx = ");
-                    try genSliceIndex(self, subscript.slice.index.*, true, true);
-                    try self.output.appendSlice(self.allocator, "; break :blk __list.items[__idx]; }");
+                // Check if this is an array slice variable (not ArrayList)
+                const is_array_slice = blk: {
+                    if (subscript.value.* == .name) {
+                        break :blk self.isArraySliceVar(subscript.value.name.id);
+                    }
+                    break :blk false;
+                };
+
+                if (is_array_slice) {
+                    // Array slice: index directly without .items
+                    if (isNegativeConstant(subscript.slice.index.*)) {
+                        try self.output.appendSlice(self.allocator, "blk: { const __list = ");
+                        try genExpr(self, subscript.value.*);
+                        try self.output.appendSlice(self.allocator, "; const __idx = ");
+                        try genSliceIndex(self, subscript.slice.index.*, true, false);
+                        try self.output.appendSlice(self.allocator, "; break :blk __list[__idx]; }");
+                    } else {
+                        try genExpr(self, subscript.value.*);
+                        try self.output.appendSlice(self.allocator, "[");
+                        try genExpr(self, subscript.slice.index.*);
+                        try self.output.appendSlice(self.allocator, "]");
+                    }
                 } else {
-                    // Positive index - simple items access
-                    try genExpr(self, subscript.value.*);
-                    try self.output.appendSlice(self.allocator, ".items[");
-                    try genExpr(self, subscript.slice.index.*);
-                    try self.output.appendSlice(self.allocator, "]");
+                    // ArrayList indexing - use .items
+                    if (isNegativeConstant(subscript.slice.index.*)) {
+                        // Need block for negative index handling
+                        try self.output.appendSlice(self.allocator, "blk: { const __list = ");
+                        try genExpr(self, subscript.value.*);
+                        try self.output.appendSlice(self.allocator, "; const __idx = ");
+                        try genSliceIndex(self, subscript.slice.index.*, true, true);
+                        try self.output.appendSlice(self.allocator, "; break :blk __list.items[__idx]; }");
+                    } else {
+                        // Positive index - simple items access
+                        try genExpr(self, subscript.value.*);
+                        try self.output.appendSlice(self.allocator, ".items[");
+                        try genExpr(self, subscript.slice.index.*);
+                        try self.output.appendSlice(self.allocator, "]");
+                    }
                 }
             } else {
                 // Array/slice/string indexing: a[b]

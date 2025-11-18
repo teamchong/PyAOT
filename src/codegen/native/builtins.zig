@@ -14,8 +14,24 @@ pub fn genLen(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
 
     // Check if argument is ArrayList (detected as .list type), dict, or tuple
     const arg_type = self.type_inferrer.inferExpr(args[0]) catch .unknown;
+
+    // Check if this is an array slice (subscript of constant array OR variable holding slice)
+    const is_array_slice = blk: {
+        // Check if it's directly a subscript of constant array
+        if (args[0] == .subscript and args[0].subscript.slice == .slice) {
+            if (args[0].subscript.value.* == .name) {
+                break :blk self.isArrayVar(args[0].subscript.value.name.id);
+            }
+        }
+        // Check if it's a variable that holds an array slice
+        if (args[0] == .name) {
+            break :blk self.isArraySliceVar(args[0].name.id);
+        }
+        break :blk false;
+    };
+
     const is_arraylist = switch (arg_type) {
-        .list => true,
+        .list => !is_array_slice, // ArrayList only if not an array slice
         else => false,
     };
     const is_dict = switch (arg_type) {

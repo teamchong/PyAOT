@@ -231,6 +231,20 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
                     const var_name_copy = try self.allocator.dupe(u8, var_name);
                     try self.array_vars.put(var_name_copy, {});
                 }
+
+                // Track if this variable holds an array slice (subscript of constant array)
+                const is_array_slice = blk: {
+                    if (assign.value.* == .subscript and assign.value.subscript.slice == .slice) {
+                        if (assign.value.subscript.value.* == .name) {
+                            break :blk self.isArrayVar(assign.value.subscript.value.name.id);
+                        }
+                    }
+                    break :blk false;
+                };
+                if (is_array_slice) {
+                    const var_name_copy = try self.allocator.dupe(u8, var_name);
+                    try self.array_slice_vars.put(var_name_copy, {});
+                }
             } else {
                 // Reassignment: x = value (no var/const keyword!)
                 try self.output.appendSlice(self.allocator, var_name);

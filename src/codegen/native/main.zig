@@ -60,6 +60,9 @@ pub const NativeCodegen = struct {
     // Track which variables hold constant arrays (vs ArrayLists)
     array_vars: std.StringHashMap(void),
 
+    // Track which variables hold array slices (result of slicing a constant array)
+    array_slice_vars: std.StringHashMap(void),
+
     // Compile-time evaluator for constant folding
     comptime_evaluator: comptime_eval.ComptimeEvaluator,
 
@@ -87,6 +90,7 @@ pub const NativeCodegen = struct {
             .lambda_vars = std.StringHashMap(void).init(allocator),
             .var_renames = std.StringHashMap([]const u8).init(allocator),
             .array_vars = std.StringHashMap(void).init(allocator),
+            .array_slice_vars = std.StringHashMap(void).init(allocator),
             .comptime_evaluator = comptime_eval.ComptimeEvaluator.init(allocator),
         };
         return self;
@@ -135,6 +139,13 @@ pub const NativeCodegen = struct {
         }
         self.array_vars.deinit();
 
+        // Clean up array slice vars tracking
+        var slice_iter = self.array_slice_vars.keyIterator();
+        while (slice_iter.next()) |key| {
+            self.allocator.free(key.*);
+        }
+        self.array_slice_vars.deinit();
+
         self.allocator.destroy(self);
     }
 
@@ -174,6 +185,11 @@ pub const NativeCodegen = struct {
     /// Check if variable holds a constant array (vs ArrayList)
     pub fn isArrayVar(self: *NativeCodegen, name: []const u8) bool {
         return self.array_vars.contains(name);
+    }
+
+    /// Check if variable holds an array slice (result of slicing constant array)
+    pub fn isArraySliceVar(self: *NativeCodegen, name: []const u8) bool {
+        return self.array_slice_vars.contains(name);
     }
 
     /// Compile a Python module to a Zig module file

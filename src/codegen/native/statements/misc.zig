@@ -25,6 +25,22 @@ fn flattenConcat(self: *NativeCodegen, node: ast.Node, parts: *std.ArrayList(ast
     try parts.append(self.allocator, node);
 }
 
+/// Check if expression results in an array slice (not ArrayList)
+/// Returns true if this is a subscript slice of a constant array variable
+fn isArraySlice(self: *NativeCodegen, node: ast.Node) bool {
+    // Check if this is a subscript with slice
+    if (node != .subscript) return false;
+    if (node.subscript.slice != .slice) return false;
+
+    // Check if the source is a constant array variable
+    const value_node = node.subscript.value.*;
+    if (value_node == .name) {
+        return self.isArrayVar(value_node.name.id);
+    }
+
+    return false;
+}
+
 /// Check if a node is an allocating method call (e.g., "text".upper())
 fn isAllocatingMethodCall(self: *NativeCodegen, node: ast.Node) bool {
     if (node != .call) return false;
@@ -135,13 +151,23 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
         for (args, 0..) |arg, i| {
             const arg_type = try self.type_inferrer.inferExpr(arg);
             if (arg_type == .list) {
-                // Generate loop to print list elements (use .items for ArrayList)
+                // Check if this is an array slice vs ArrayList
+                const is_array_slice = isArraySlice(self, arg);
+
+                // Generate loop to print list elements
                 try self.output.appendSlice(self.allocator, "{\n");
                 try self.output.appendSlice(self.allocator, "    const __list = ");
                 try self.genExpr(arg);
                 try self.output.appendSlice(self.allocator, ";\n");
                 try self.output.appendSlice(self.allocator, "    std.debug.print(\"[\", .{});\n");
-                try self.output.appendSlice(self.allocator, "    for (__list.items, 0..) |__elem, __idx| {\n");
+
+                // Array slices: iterate directly, ArrayList: use .items
+                if (is_array_slice) {
+                    try self.output.appendSlice(self.allocator, "    for (__list, 0..) |__elem, __idx| {\n");
+                } else {
+                    try self.output.appendSlice(self.allocator, "    for (__list.items, 0..) |__elem, __idx| {\n");
+                }
+
                 try self.output.appendSlice(self.allocator, "        if (__idx > 0) std.debug.print(\", \", .{});\n");
                 try self.output.appendSlice(self.allocator, "        std.debug.print(\"{d}\", .{__elem});\n");
                 try self.output.appendSlice(self.allocator, "    }\n");
