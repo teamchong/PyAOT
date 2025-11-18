@@ -81,6 +81,26 @@ pub fn genBinOp(self: *NativeCodegen, binop: ast.Node.BinOp) CodegenError!void {
         return;
     }
 
+    // Special handling for division - can throw ZeroDivisionError
+    if (binop.op == .Div or binop.op == .FloorDiv) {
+        try self.output.appendSlice(self.allocator, "try runtime.divideInt(");
+        try genExpr(self, binop.left.*);
+        try self.output.appendSlice(self.allocator, ", ");
+        try genExpr(self, binop.right.*);
+        try self.output.appendSlice(self.allocator, ")");
+        return;
+    }
+
+    // Special handling for modulo - can throw ZeroDivisionError
+    if (binop.op == .Mod) {
+        try self.output.appendSlice(self.allocator, "try runtime.moduloInt(");
+        try genExpr(self, binop.left.*);
+        try self.output.appendSlice(self.allocator, ", ");
+        try genExpr(self, binop.right.*);
+        try self.output.appendSlice(self.allocator, ")");
+        return;
+    }
+
     try self.output.appendSlice(self.allocator, "(");
     try genExpr(self, binop.left.*);
 
@@ -88,7 +108,6 @@ pub fn genBinOp(self: *NativeCodegen, binop: ast.Node.BinOp) CodegenError!void {
         .Add => " + ",
         .Sub => " - ",
         .Mult => " * ",
-        .Div => " / ",
         else => " ? ",
     };
     try self.output.appendSlice(self.allocator, op_str);

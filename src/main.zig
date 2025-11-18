@@ -168,6 +168,14 @@ fn getArch() []const u8 {
     };
 }
 
+fn compileModule(allocator: std.mem.Allocator, module_path: []const u8, module_name: []const u8) !void {
+    // Stub for now - compile imported modules as separate shared libraries
+    _ = allocator;
+    _ = module_path;
+    _ = module_name;
+    // TODO: Implement module compilation
+}
+
 fn compileFile(allocator: std.mem.Allocator, opts: CompileOptions) !void {
     // Read source file
     const source = try std.fs.cwd().readFileAlloc(allocator, opts.input_file, 10 * 1024 * 1024); // 10MB max

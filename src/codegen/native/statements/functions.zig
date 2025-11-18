@@ -4,6 +4,29 @@ const ast = @import("../../../ast.zig");
 const NativeCodegen = @import("../main.zig").NativeCodegen;
 const CodegenError = @import("../main.zig").CodegenError;
 
+/// Check if function returns a lambda (closure)
+fn returnsLambda(body: []ast.Node) bool {
+    for (body) |stmt| {
+        if (stmt == .return_stmt) {
+            if (stmt.return_stmt.value) |val| {
+                if (val.* == .lambda) return true;
+            }
+        }
+        // Check nested statements
+        if (stmt == .if_stmt) {
+            if (returnsLambda(stmt.if_stmt.body)) return true;
+            if (returnsLambda(stmt.if_stmt.else_body)) return true;
+        }
+        if (stmt == .while_stmt) {
+            if (returnsLambda(stmt.while_stmt.body)) return true;
+        }
+        if (stmt == .for_stmt) {
+            if (returnsLambda(stmt.for_stmt.body)) return true;
+        }
+    }
+    return false;
+}
+
 /// Check if function has a return statement (recursively)
 fn hasReturnStatement(body: []ast.Node) bool {
     for (body) |stmt| {
@@ -21,6 +44,67 @@ fn hasReturnStatement(body: []ast.Node) bool {
         }
     }
     return false;
+}
+
+/// Check if a parameter is called as a function in the body
+fn isParameterCalled(body: []ast.Node, param_name: []const u8) bool {
+    for (body) |stmt| {
+        if (isParameterCalledInStmt(stmt, param_name)) return true;
+    }
+    return false;
+}
+
+fn isParameterCalledInStmt(stmt: ast.Node, param_name: []const u8) bool {
+    return switch (stmt) {
+        .expr_stmt => |expr| isParameterCalledInExpr(expr.value.*, param_name),
+        .assign => |assign| isParameterCalledInExpr(assign.value.*, param_name),
+        .return_stmt => |ret| if (ret.value) |val| isParameterCalledInExpr(val.*, param_name) else false,
+        .if_stmt => |if_stmt| {
+            if (isParameterCalledInExpr(if_stmt.condition.*, param_name)) return true;
+            for (if_stmt.body) |s| if (isParameterCalledInStmt(s, param_name)) return true;
+            for (if_stmt.else_body) |s| if (isParameterCalledInStmt(s, param_name)) return true;
+            return false;
+        },
+        .while_stmt => |while_stmt| {
+            if (isParameterCalledInExpr(while_stmt.condition.*, param_name)) return true;
+            for (while_stmt.body) |s| if (isParameterCalledInStmt(s, param_name)) return true;
+            return false;
+        },
+        .for_stmt => |for_stmt| {
+            for (for_stmt.body) |s| if (isParameterCalledInStmt(s, param_name)) return true;
+            return false;
+        },
+        else => false,
+    };
+}
+
+fn isParameterCalledInExpr(expr: ast.Node, param_name: []const u8) bool {
+    return switch (expr) {
+        .call => |call| {
+            // Check if function being called is the parameter
+            if (call.func.* == .name and std.mem.eql(u8, call.func.name.id, param_name)) {
+                return true;
+            }
+            // Check arguments recursively
+            for (call.args) |arg| {
+                if (isParameterCalledInExpr(arg, param_name)) return true;
+            }
+            return false;
+        },
+        .lambda => |lam| isParameterCalledInExpr(lam.body.*, param_name),
+        .binop => |binop| {
+            return isParameterCalledInExpr(binop.left.*, param_name) or
+                isParameterCalledInExpr(binop.right.*, param_name);
+        },
+        .compare => |comp| {
+            if (isParameterCalledInExpr(comp.left.*, param_name)) return true;
+            for (comp.comparators) |c| {
+                if (isParameterCalledInExpr(c, param_name)) return true;
+            }
+            return false;
+        },
+        else => false,
+    };
 }
 
 /// Convert Python type hint to Zig type
@@ -47,16 +131,23 @@ pub fn genFunctionDef(self: *NativeCodegen, func: ast.Node.FunctionDef) CodegenE
         if (i > 0) try self.emit(", ");
         try self.emit(arg.name);
         try self.emit(": ");
-        // Convert Python type hint to Zig type
-        const zig_type = pythonTypeToZig(arg.type_annotation);
-        try self.emit(zig_type);
+        // Check if this parameter is used as a function (called in the body)
+        // If so, use anytype to allow function pointers
+        const is_called = isParameterCalled(func.body, arg.name);
+        if (is_called) {
+            try self.emit("anytype"); // Let Zig infer function type at comptime
+        } else {
+            // Convert Python type hint to Zig type
+            const zig_type = pythonTypeToZig(arg.type_annotation);
+            try self.emit(zig_type);
+        }
     }
 
     try self.emit(") ");
 
     // Determine return type based on whether function has return statements
     if (hasReturnStatement(func.body)) {
-        try self.emit("i64 {\n");
+        try self.emit("i64 {\n"); // TODO: Support closure return types
     } else {
         try self.emit("void {\n");
     }
@@ -65,6 +156,11 @@ pub fn genFunctionDef(self: *NativeCodegen, func: ast.Node.FunctionDef) CodegenE
 
     // Push new scope for function body
     try self.pushScope();
+
+    // Declare function parameters in the scope so closures can capture them
+    for (func.args) |arg| {
+        try self.declareVar(arg.name);
+    }
 
     // Generate function body
     for (func.body) |stmt| {

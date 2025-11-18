@@ -138,8 +138,9 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
                         if (obj_type == .string) {
                             const method_name = attr.attr;
                             // All string methods that allocate and return new strings
+                            // NOTE: strip/lstrip/rstrip use std.mem.trim - they DON'T allocate!
                             const allocating_methods = [_][]const u8{
-                                "upper", "lower", "strip", "lstrip", "rstrip",
+                                "upper", "lower",
                                 "replace", "capitalize", "title", "swapcase",
                                 "center", "ljust", "rjust", "join",
                             };

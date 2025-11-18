@@ -148,10 +148,178 @@ pub const NativeCodegen = struct {
         }
     }
 
+    /// Compile a Python module to a Zig module file
+    fn compileModuleToZig(module_name: []const u8, allocator: std.mem.Allocator) !void {
+        // Find the .py file (in same directory or examples/)
+        var py_path_buf: [1024]u8 = undefined;
+        const py_path = blk: {
+            // Try current directory
+            const path1 = std.fmt.bufPrint(&py_path_buf, "{s}.py", .{module_name}) catch return;
+            std.fs.cwd().access(path1, .{}) catch {
+                // Try examples directory
+                const path2 = std.fmt.bufPrint(&py_path_buf, "examples/{s}.py", .{module_name}) catch return;
+                std.fs.cwd().access(path2, .{}) catch return; // Module not found
+                break :blk path2;
+            };
+            break :blk path1;
+        };
+
+        // Read source
+        const source = try std.fs.cwd().readFileAlloc(allocator, py_path, 10 * 1024 * 1024);
+        defer allocator.free(source);
+
+        // Lex, parse, analyze
+        const lexer_mod = @import("../../lexer.zig");
+        const parser_mod = @import("../../parser.zig");
+        const semantic_types_mod = @import("../../analysis/types.zig");
+        const lifetime_analysis_mod = @import("../../analysis/lifetime.zig");
+        const native_types_mod = @import("../../analysis/native_types.zig");
+
+        var lex = try lexer_mod.Lexer.init(allocator, source);
+        defer lex.deinit();
+        const tokens = try lex.tokenize();
+        defer allocator.free(tokens);
+
+        var p = parser_mod.Parser.init(allocator, tokens);
+        var tree = try p.parse();
+        defer tree.deinit(allocator);
+
+        if (tree != .module) return error.InvalidAST;
+
+        var semantic_info = semantic_types_mod.SemanticInfo.init(allocator);
+        defer semantic_info.deinit();
+        _ = try lifetime_analysis_mod.analyzeLifetimes(&semantic_info, tree, 1);
+
+        var type_inferrer = try native_types_mod.TypeInferrer.init(allocator);
+        defer type_inferrer.deinit();
+        try type_inferrer.analyze(tree.module);
+
+        // Use full codegen to generate proper module code
+        var codegen = try NativeCodegen.init(allocator, &type_inferrer, &semantic_info);
+        defer codegen.deinit();
+
+        // Generate imports
+        try codegen.emit("const std = @import(\"std\");\n");
+        try codegen.emit("const runtime = @import(\"./runtime.zig\");\n\n");
+
+        // Generate only function and class definitions (make all functions pub)
+        for (tree.module.body) |stmt| {
+            if (stmt == .function_def or stmt == .class_def) {
+                // For functions, we need to make them pub
+                if (stmt == .function_def) {
+                    const func = stmt.function_def;
+                    try codegen.emit("pub ");
+
+                    // Generate async keyword if needed
+                    if (func.is_async) {
+                        try codegen.emit("async ");
+                    }
+
+                    try codegen.emit("fn ");
+                    try codegen.emit(func.name);
+                    try codegen.emit("(");
+
+                    // Parameters with type inference
+                    for (func.args, 0..) |arg, i| {
+                        if (i > 0) try codegen.emit(", ");
+                        try codegen.emit(arg.name);
+                        try codegen.emit(": ");
+
+                        // Try to infer parameter type
+                        const param_type = type_inferrer.var_types.get(arg.name) orelse native_types_mod.NativeType.int;
+                        const type_str = switch (param_type) {
+                            .int => "i64",
+                            .float => "f64",
+                            .bool => "bool",
+                            .string => "[]const u8",
+                            else => "i64",
+                        };
+                        try codegen.emit(type_str);
+                    }
+
+                    // Add allocator parameter for module functions
+                    if (func.args.len > 0) try codegen.emit(", ");
+                    try codegen.emit("allocator: std.mem.Allocator");
+
+                    try codegen.emit(") ");
+
+                    // Return type - default to i64
+                    try codegen.emit("i64");
+                    try codegen.emit(" {\n");
+
+                    codegen.indent();
+
+                    // Generate function body using full codegen
+                    for (func.body) |body_stmt| {
+                        try codegen.generateStmt(body_stmt);
+                    }
+
+                    codegen.dedent();
+                    try codegen.emit("}\n\n");
+                } else {
+                    // For classes, use the full codegen
+                    try statements.genClassDef(codegen, stmt.class_def);
+                }
+            }
+        }
+
+        const zig_code = try codegen.output.toOwnedSlice(allocator);
+        defer allocator.free(zig_code);
+
+        // Write to .build/module_name.zig
+        const zig_path = try std.fmt.allocPrint(allocator, ".build/{s}.zig", .{module_name});
+        defer allocator.free(zig_path);
+
+        const file = try std.fs.cwd().createFile(zig_path, .{});
+        defer file.close();
+        try file.writeAll(zig_code);
+    }
+
+    /// Scan AST for import statements and collect module names
+    fn collectImports(module: ast.Node.Module, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
+        var imports = std.ArrayList([]const u8){};
+
+        const stdlib = [_][]const u8{
+            "pytest", "unittest", "sys", "os", "math", "json",
+            "re", "itertools", "functools", "collections",
+            "typing", "abc", "enum", "dataclasses", "asyncio",
+        };
+
+        for (module.body) |stmt| {
+            if (stmt == .import_stmt) {
+                const module_name = stmt.import_stmt.module;
+
+                // Skip stdlib modules
+                var is_stdlib = false;
+                for (stdlib) |mod| {
+                    if (std.mem.eql(u8, module_name, mod)) {
+                        is_stdlib = true;
+                        break;
+                    }
+                }
+
+                if (!is_stdlib) {
+                    try imports.append(allocator, module_name);
+                }
+            }
+        }
+
+        return imports;
+    }
+
     /// Generate native Zig code for module
     pub fn generate(self: *NativeCodegen, module: ast.Node.Module) ![]const u8 {
         // PHASE 1: Analyze module to determine requirements
         const analysis = try analyzer.analyzeModule(module, self.allocator);
+
+        // PHASE 1.5: Collect imports and compile imported modules
+        var imported_modules = try collectImports(module, self.allocator);
+        defer imported_modules.deinit(self.allocator);
+
+        // Compile each imported module to .zig file
+        for (imported_modules.items) |mod_name| {
+            try compileModuleToZig(mod_name, self.allocator);
+        }
 
         // PHASE 2: Register all classes for inheritance support
         for (module.body) |stmt| {
@@ -167,6 +335,16 @@ pub const NativeCodegen = struct {
         if (analysis.needs_string_utils) {
             try self.emit("const string_utils = @import(\"string_utils.zig\");\n");
         }
+
+        // Add user module imports
+        for (imported_modules.items) |mod_name| {
+            try self.emit("const ");
+            try self.emit(mod_name);
+            try self.emit(" = @import(\"");
+            try self.emit(mod_name);
+            try self.emit(".zig\");\n");
+        }
+
         try self.emit("\n");
 
         // PHASE 4: Define __name__ constant (for if __name__ == "__main__" support)

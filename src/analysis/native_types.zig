@@ -19,6 +19,10 @@ pub const NativeType = union(enum) {
 
     // Functions
     closure: []const u8, // Closure struct name (__Closure_N)
+    function: struct {
+        params: []const NativeType,
+        return_type: *const NativeType,
+    }, // Function pointer type: *const fn(T, U) R
 
     // Special
     none: void, // void or ?T
@@ -53,6 +57,15 @@ pub const NativeType = union(enum) {
                 try buf.appendSlice(allocator, "}");
             },
             .closure => |name| try buf.appendSlice(allocator, name),
+            .function => |fn_type| {
+                try buf.appendSlice(allocator, "*const fn (");
+                for (fn_type.params, 0..) |param, i| {
+                    if (i > 0) try buf.appendSlice(allocator, ", ");
+                    try param.toZigType(allocator, buf);
+                }
+                try buf.appendSlice(allocator, ") ");
+                try fn_type.return_type.toZigType(allocator, buf);
+            },
             .none => try buf.appendSlice(allocator, "void"),
             .unknown => try buf.appendSlice(allocator, "*runtime.PyObject"),
         }
@@ -391,6 +404,21 @@ pub const TypeInferrer = struct {
                 break :blk .{ .tuple = elem_types };
             },
             .compare => .bool, // Comparison expressions always return bool
+            .lambda => |lam| blk: {
+                // Infer function type from lambda
+                // For now, default all params and return to i64
+                // TODO: Better type inference based on usage
+                const param_types = try self.allocator.alloc(NativeType, lam.args.len);
+                for (param_types) |*pt| {
+                    pt.* = .int; // Default to i64
+                }
+                const return_ptr = try self.allocator.create(NativeType);
+                return_ptr.* = .int; // Default to i64
+                break :blk .{ .function = .{
+                    .params = param_types,
+                    .return_type = return_ptr,
+                } };
+            },
             else => .unknown,
         };
     }

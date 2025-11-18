@@ -10,15 +10,17 @@ const functions = @import("statements/functions.zig");
 const control = @import("statements/control.zig");
 const assign = @import("statements/assign.zig");
 const misc = @import("statements/misc.zig");
+const try_except = @import("statements/try_except.zig");
 
 // Re-export public functions
 pub const genFunctionDef = functions.genFunctionDef;
 pub const genClassDef = functions.genClassDef;
 pub const genReturn = misc.genReturn;
+pub const genImport = misc.genImport;
 pub const genImportFrom = misc.genImportFrom;
 pub const genPrint = misc.genPrint;
 pub const genAssert = misc.genAssert;
-pub const genTry = misc.genTry;
+pub const genTry = try_except.genTry;
 pub const genAssign = assign.genAssign;
 pub const genAugAssign = assign.genAugAssign;
 pub const genExprStmt = assign.genExprStmt;
