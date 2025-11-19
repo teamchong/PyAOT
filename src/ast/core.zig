@@ -1,0 +1,290 @@
+const std = @import("std");
+const fstring = @import("fstring.zig");
+
+/// AST node types matching Python's ast module
+pub const Node = union(enum) {
+    module: Module,
+    assign: Assign,
+    aug_assign: AugAssign,
+    binop: BinOp,
+    unaryop: UnaryOp,
+    compare: Compare,
+    boolop: BoolOp,
+    call: Call,
+    name: Name,
+    constant: Constant,
+    fstring: fstring.FString,
+    if_stmt: If,
+    for_stmt: For,
+    while_stmt: While,
+    function_def: FunctionDef,
+    lambda: Lambda,
+    class_def: ClassDef,
+    return_stmt: Return,
+    list: List,
+    listcomp: ListComp,
+    dict: Dict,
+    dictcomp: DictComp,
+    tuple: Tuple,
+    subscript: Subscript,
+    attribute: Attribute,
+    expr_stmt: ExprStmt,
+    await_expr: AwaitExpr,
+    import_stmt: Import,
+    import_from: ImportFrom,
+    assert_stmt: Assert,
+    try_stmt: Try,
+    pass: void,
+    break_stmt: void,
+    continue_stmt: void,
+
+    // Type aliases for backward compatibility with nested access (ast.Node.FString)
+    pub const FString = fstring.FString;
+    pub const FStringPart = fstring.FStringPart;
+
+    pub const Module = struct {
+        body: []Node,
+    };
+
+    pub const Assign = struct {
+        targets: []Node,
+        value: *Node,
+    };
+
+    pub const AugAssign = struct {
+        target: *Node,
+        op: Operator,
+        value: *Node,
+    };
+
+    pub const BinOp = struct {
+        left: *Node,
+        op: Operator,
+        right: *Node,
+    };
+
+    pub const UnaryOp = struct {
+        op: UnaryOperator,
+        operand: *Node,
+    };
+
+    pub const Call = struct {
+        func: *Node,
+        args: []Node,
+    };
+
+    pub const Name = struct {
+        id: []const u8,
+    };
+
+    pub const Constant = struct {
+        value: Value,
+    };
+
+    pub const If = struct {
+        condition: *Node,
+        body: []Node,
+        else_body: []Node,
+    };
+
+    pub const For = struct {
+        target: *Node,
+        iter: *Node,
+        body: []Node,
+    };
+
+    pub const While = struct {
+        condition: *Node,
+        body: []Node,
+    };
+
+    pub const FunctionDef = struct {
+        name: []const u8,
+        args: []Arg,
+        body: []Node,
+        is_async: bool,
+        decorators: []Node,
+    };
+
+    pub const Lambda = struct {
+        args: []Arg,
+        body: *Node, // Single expression, not statement list
+    };
+
+    pub const ClassDef = struct {
+        name: []const u8,
+        bases: [][]const u8,
+        body: []Node,
+    };
+
+    pub const Return = struct {
+        value: ?*Node,
+    };
+
+    pub const Compare = struct {
+        left: *Node,
+        ops: []CompareOp,
+        comparators: []Node,
+    };
+
+    pub const BoolOp = struct {
+        op: BoolOperator,
+        values: []Node,
+    };
+
+    pub const List = struct {
+        elts: []Node,
+    };
+
+    pub const ListComp = struct {
+        elt: *Node, // Expression to evaluate for each element
+        generators: []Comprehension, // One or more for clauses
+    };
+
+    pub const Comprehension = struct {
+        target: *Node, // Loop variable (e.g., 'x' in 'for x in items')
+        iter: *Node, // Iterable (e.g., 'items')
+        ifs: []Node, // Optional filter conditions
+    };
+
+    pub const Dict = struct {
+        keys: []Node,
+        values: []Node,
+    };
+
+    pub const DictComp = struct {
+        key: *Node, // Key expression
+        value: *Node, // Value expression
+        generators: []Comprehension, // One or more for clauses
+    };
+
+    pub const Tuple = struct {
+        elts: []Node,
+    };
+
+    pub const Subscript = struct {
+        value: *Node,
+        slice: Slice,
+    };
+
+    pub const Slice = union(enum) {
+        index: *Node, // items[0]
+        slice: SliceRange, // items[1:3]
+    };
+
+    pub const SliceRange = struct {
+        lower: ?*Node, // start (null = from beginning)
+        upper: ?*Node, // end (null = to end)
+        step: ?*Node, // step (null = 1)
+    };
+
+    pub const Attribute = struct {
+        value: *Node,
+        attr: []const u8,
+    };
+
+    pub const ExprStmt = struct {
+        value: *Node,
+    };
+
+    pub const AwaitExpr = struct {
+        value: *Node,
+    };
+
+    /// Import statement: import numpy as np
+    pub const Import = struct {
+        module: []const u8, // "numpy"
+        asname: ?[]const u8, // "np" or null
+    };
+
+    /// From-import statement: from numpy import array, zeros
+    pub const ImportFrom = struct {
+        module: []const u8, // "numpy"
+        names: [][]const u8, // ["array", "zeros"]
+        asnames: []?[]const u8, // [null, null] or ["arr", null]
+    };
+
+    /// Assert statement: assert condition or assert condition, message
+    pub const Assert = struct {
+        condition: *Node,
+        msg: ?*Node,
+    };
+
+    /// Try/except/finally statement
+    pub const Try = struct {
+        body: []Node, // try block
+        handlers: []ExceptHandler, // except clauses
+        else_body: []Node, // else block (optional, rarely used)
+        finalbody: []Node, // finally block (optional)
+    };
+
+    /// Exception handler clause
+    pub const ExceptHandler = struct {
+        type: ?[]const u8, // Exception type name (or null for bare except)
+        name: ?[]const u8, // Variable name (as e) - not implementing yet
+        body: []Node, // Handler body
+    };
+
+    /// Recursively free all allocations in the AST
+    pub fn deinit(self: *const Node, allocator: std.mem.Allocator) void {
+        const deinit_impl = @import("deinit.zig");
+        deinit_impl.deinit(self, allocator);
+    }
+};
+
+pub const Operator = enum {
+    Add,
+    Sub,
+    Mult,
+    Div,
+    FloorDiv,
+    Mod,
+    Pow,
+    BitAnd,
+    BitOr,
+    BitXor,
+};
+
+pub const CompareOp = enum {
+    Eq,
+    NotEq,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+    In,
+    NotIn,
+};
+
+pub const BoolOperator = enum {
+    And,
+    Or,
+};
+
+pub const UnaryOperator = enum {
+    Not,
+    UAdd, // Unary plus (+x)
+    USub, // Unary minus (-x)
+};
+
+pub const Value = union(enum) {
+    int: i64,
+    float: f64,
+    string: []const u8,
+    bool: bool,
+};
+
+pub const Arg = struct {
+    name: []const u8,
+    type_annotation: ?[]const u8,
+    default: ?*Node,
+};
+
+/// Parse JSON AST from Python's ast.dump()
+pub fn parseFromJson(allocator: std.mem.Allocator, json_str: []const u8) !Node {
+    // TODO: Implement JSON → AST parsing
+    // For now, this is a stub that will be implemented in Phase 1
+    _ = allocator;
+    _ = json_str;
+    return error.NotImplemented;
+}
