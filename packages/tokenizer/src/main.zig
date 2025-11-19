@@ -90,18 +90,19 @@ pub fn main() !void {
         "Sentiment analysis determines emotional tone in text.",
     };
 
-    // Scale up: 2000 texts for more realistic benchmark (closer to roadmap's test case)
-    const training_texts = base_texts ** 133; // 1995 texts
-
-    var trainer = try Trainer.init(512, allocator); // Larger vocab (512 tokens) for better comparison
+    // Large training set for ~60s benchmark (15,000 texts)
+    const training_texts = base_texts ** 1000;
+    var trainer = try Trainer.init(2048, allocator); // Large vocab
     defer trainer.deinit();
+
+    std.debug.print("Training with {} texts, {} target merges...\n", .{training_texts.len, 2048});
 
     const train_start = std.time.nanoTimestamp();
     var tokenizer = try trainer.trainFromIterator(&training_texts);
     const train_end = std.time.nanoTimestamp();
     const train_ms = @divFloor(train_end - train_start, 1_000_000);
 
-    std.debug.print("  Training time: {}ms\n", .{train_ms});
+    std.debug.print("  Training time: {}ms ({:.1}s)\n", .{train_ms, @as(f64, @floatFromInt(train_ms)) / 1000.0});
     std.debug.print("  Learned merges: {}\n", .{tokenizer.merges.items.len});
     std.debug.print("  Vocab size: {}\n\n", .{256 + tokenizer.merges.items.len});
 
@@ -119,17 +120,17 @@ pub fn main() !void {
 
     // Calibration: How many iterations for ~60s?
     std.debug.print("  Calibrating iterations...\n", .{});
-    const cal_start = std.time.nanoTimestamp();
+    const encode_cal_start = std.time.nanoTimestamp();
     var tokens = try tokenizer.encode(test_text);
     allocator.free(tokens);
-    const cal_elapsed = std.time.nanoTimestamp() - cal_start;
+    const encode_cal_elapsed = std.time.nanoTimestamp() - encode_cal_start;
 
     const target_duration_ns: i128 = 60_000_000_000; // 60 seconds
-    const iterations = @max(100, @min(100_000, @as(usize, @intCast(@divFloor(target_duration_ns, cal_elapsed)))));
+    const iterations = @max(100, @min(100_000, @as(usize, @intCast(@divFloor(target_duration_ns, encode_cal_elapsed)))));
 
     std.debug.print("  Running {} iterations (estimated {}s)\n", .{
         iterations,
-        @divFloor(cal_elapsed * @as(i128, @intCast(iterations)), 1_000_000_000),
+        @divFloor(encode_cal_elapsed * @as(i128, @intCast(iterations)), 1_000_000_000),
     });
 
     // Actual benchmark
