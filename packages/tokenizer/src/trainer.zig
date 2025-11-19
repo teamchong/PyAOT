@@ -176,34 +176,25 @@ fn countPairsParallelOLD(
     return merged;
 }
 
-/// Count pairs in a chunk (with SIMD + dedup)
+/// Count pairs in a chunk (SIMPLE like Rust - just iterate!)
 fn countPairsChunk(
     words: []const Word,
     pair_counts: *std.HashMap(Pair, i32, PairContext, std.hash_map.default_max_load_percentage),
 ) void {
     for (words) |word| {
-        if (word.ids.len < 2) continue;
+        if (word.ids.len < 2 or word.count == 0) continue;
 
-        // Use SIMD to count each unique pair
-        var seen = std.AutoHashMap(Pair, void).init(pair_counts.allocator);
-        defer seen.deinit();
-
+        // Simple iteration like Rust - no SIMD, no "seen" HashMap!
         var i: usize = 0;
         while (i < word.ids.len - 1) : (i += 1) {
             const pair = Pair{ .left = word.ids[i], .right = word.ids[i + 1] };
 
-            // Only count each unique pair once per word
-            const gop = seen.getOrPut(pair) catch continue;
-            if (gop.found_existing) continue;
-
-            const count = countPairsSIMD(word.ids, pair);
-            const weighted_count = count * @as(u32, @intCast(word.count));
-
-            const pair_gop = pair_counts.getOrPut(pair) catch continue;
-            if (pair_gop.found_existing) {
-                pair_gop.value_ptr.* += @intCast(weighted_count);
+            // Add word.count to this pair's frequency
+            const gop = pair_counts.getOrPut(pair) catch continue;
+            if (gop.found_existing) {
+                gop.value_ptr.* += word.count;
             } else {
-                pair_gop.value_ptr.* = @intCast(weighted_count);
+                gop.value_ptr.* = word.count;
             }
         }
     }
