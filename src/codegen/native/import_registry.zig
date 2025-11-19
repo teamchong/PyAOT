@@ -1,0 +1,119 @@
+//! Import Registry - Centralized Python→Zig module mapping
+//!
+//! This module manages how Python imports are translated to Zig code.
+//! It implements the three-tier strategy:
+//!
+//! Tier 1 (zig_runtime): Performance-critical modules (json, http, async)
+//! Tier 2 (c_library): C library wrappers (numpy, sqlite3, ssl)
+//! Tier 3 (compile_python): Pure Python modules (pathlib, urllib)
+//!
+//! Usage:
+//!   var registry = try createDefaultRegistry(allocator);
+//!   const info = registry.lookup("json");
+//!   const import_code = info.zig_import; // "@import(\"runtime\").json"
+
+const std = @import("std");
+
+/// Strategy for handling Python imports
+pub const ImportStrategy = enum {
+    /// Use Zig implementation (Tier 1: performance-critical)
+    zig_runtime,
+
+    /// Use C library via @cImport (Tier 2: C interop)
+    c_library,
+
+    /// Compile Python source (Tier 3: pure Python)
+    compile_python,
+
+    /// Not yet supported (error)
+    unsupported,
+};
+
+/// Information about how to import a Python module
+pub const ImportInfo = struct {
+    /// Python module name (e.g. "json", "numpy")
+    python_module: []const u8,
+
+    /// Strategy to use
+    strategy: ImportStrategy,
+
+    /// Zig import path (e.g. "@import(\"runtime\").json")
+    /// Only used for zig_runtime and c_library strategies
+    zig_import: ?[]const u8,
+
+    /// C library name for linking (e.g. "openblas")
+    /// Only used for c_library strategy
+    c_library: ?[]const u8,
+
+    /// Python source path for compilation
+    /// Only used for compile_python strategy
+    python_source: ?[]const u8,
+};
+
+pub const ImportRegistry = struct {
+    allocator: std.mem.Allocator,
+    registry: std.StringHashMap(ImportInfo),
+
+    pub fn init(allocator: std.mem.Allocator) ImportRegistry {
+        return ImportRegistry{
+            .allocator = allocator,
+            .registry = std.StringHashMap(ImportInfo).init(allocator),
+        };
+    }
+
+    pub fn deinit(self: *ImportRegistry) void {
+        self.registry.deinit();
+    }
+
+    /// Register a Python module mapping
+    pub fn register(
+        self: *ImportRegistry,
+        python_module: []const u8,
+        strategy: ImportStrategy,
+        zig_import: ?[]const u8,
+        c_library: ?[]const u8,
+    ) !void {
+        const info = ImportInfo{
+            .python_module = python_module,
+            .strategy = strategy,
+            .zig_import = zig_import,
+            .c_library = c_library,
+            .python_source = null,
+        };
+        try self.registry.put(python_module, info);
+    }
+
+    /// Look up how to import a Python module
+    pub fn lookup(self: *ImportRegistry, python_module: []const u8) ?ImportInfo {
+        return self.registry.get(python_module);
+    }
+
+    /// Get Zig import statement for a Python module
+    pub fn getImportCode(self: *ImportRegistry, python_module: []const u8) ?[]const u8 {
+        const info = self.lookup(python_module) orelse return null;
+        return info.zig_import;
+    }
+};
+
+/// Initialize registry with built-in Python→Zig mappings
+pub fn createDefaultRegistry(allocator: std.mem.Allocator) !ImportRegistry {
+    var registry = ImportRegistry.init(allocator);
+
+    // Tier 1: Zig implementations (performance-critical)
+    try registry.register("json", .zig_runtime, "@import(\"runtime\").json", null);
+    try registry.register("http", .zig_runtime, "@import(\"runtime\").http", null);
+    try registry.register("asyncio", .zig_runtime, "@import(\"runtime\").async", null);
+
+    // Tier 2: C library wrappers
+    try registry.register("numpy", .c_library, "@import(\"c_interop\").numpy", "openblas");
+    try registry.register("sqlite3", .c_library, "@import(\"c_interop\").sqlite3", "sqlite3");
+    try registry.register("zlib", .c_library, "@import(\"c_interop\").zlib", "z");
+    try registry.register("ssl", .c_library, "@import(\"c_interop\").ssl", "ssl");
+
+    // Tier 3: Mark as compile_python (will be handled later)
+    try registry.register("pathlib", .compile_python, null, null);
+    try registry.register("urllib", .compile_python, null, null);
+    try registry.register("datetime", .compile_python, null, null);
+
+    return registry;
+}

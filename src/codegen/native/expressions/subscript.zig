@@ -56,7 +56,7 @@ pub fn genSubscript(self: *NativeCodegen, subscript: ast.Node.Subscript) Codegen
             const has_magic_method = blk: {
                 if (subscript.value.* == .name) {
                     // Check all registered classes to see if any have __getitem__
-                    var class_iter = self.classes.iterator();
+                    var class_iter = self.class_registry.iterator();
                     while (class_iter.next()) |entry| {
                         if (self.classHasMethod(entry.key_ptr.*, "__getitem__")) {
                             // Found a class with __getitem__ - we'll generate the call

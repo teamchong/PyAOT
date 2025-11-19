@@ -210,7 +210,7 @@ pub fn dispatchCall(self: *NativeCodegen, call: ast.Node.Call) CodegenError!bool
             const is_list = blk: {
                 if (obj == .name) {
                     const var_name = obj.name.id;
-                    if (self.type_inferrer.var_types.get(var_name)) |var_type| {
+                    if (self.getSymbolType(var_name)) |var_type| {
                         break :blk switch (var_type) {
                             .list => true,
                             else => false,

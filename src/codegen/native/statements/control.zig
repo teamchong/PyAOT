@@ -3,42 +3,43 @@ const std = @import("std");
 const ast = @import("../../../ast.zig");
 const NativeCodegen = @import("../main.zig").NativeCodegen;
 const CodegenError = @import("../main.zig").CodegenError;
+const CodeBuilder = @import("../code_builder.zig").CodeBuilder;
 
 /// Generate if statement
 pub fn genIf(self: *NativeCodegen, if_stmt: ast.Node.If) CodegenError!void {
-    try self.emitIndent();
-    try self.output.appendSlice(self.allocator, "if (");
-    try self.genExpr(if_stmt.condition.*);
-    try self.output.appendSlice(self.allocator, ") {\n");
+    var builder = CodeBuilder.init(self);
 
-    self.indent();
+    try self.emitIndent();
+    _ = try builder.write("if (");
+    try self.genExpr(if_stmt.condition.*);
+    _ = try builder.write(")");
+    _ = try builder.beginBlock();
+
     for (if_stmt.body) |stmt| {
         try self.generateStmt(stmt);
     }
-    self.dedent();
 
     if (if_stmt.else_body.len > 0) {
-        try self.emitIndent();
-        try self.output.appendSlice(self.allocator, "} else {\n");
-        self.indent();
+        _ = try builder.elseClause();
+        _ = try builder.beginBlock();
         for (if_stmt.else_body) |stmt| {
             try self.generateStmt(stmt);
         }
-        self.dedent();
+        _ = try builder.endBlock();
+    } else {
+        _ = try builder.endBlock();
     }
-
-    try self.emitIndent();
-    try self.output.appendSlice(self.allocator, "}\n");
 }
 
 /// Generate while loop
 pub fn genWhile(self: *NativeCodegen, while_stmt: ast.Node.While) CodegenError!void {
-    try self.emitIndent();
-    try self.output.appendSlice(self.allocator, "while (");
-    try self.genExpr(while_stmt.condition.*);
-    try self.output.appendSlice(self.allocator, ") {\n");
+    var builder = CodeBuilder.init(self);
 
-    self.indent();
+    try self.emitIndent();
+    _ = try builder.write("while (");
+    try self.genExpr(while_stmt.condition.*);
+    _ = try builder.write(")");
+    _ = try builder.beginBlock();
 
     // Push new scope for loop body
     try self.pushScope();
@@ -50,10 +51,7 @@ pub fn genWhile(self: *NativeCodegen, while_stmt: ast.Node.While) CodegenError!v
     // Pop scope when exiting loop
     self.popScope();
 
-    self.dedent();
-
-    try self.emitIndent();
-    try self.output.appendSlice(self.allocator, "}\n");
+    _ = try builder.endBlock();
 }
 
 /// Generate tuple unpacking loop
@@ -598,18 +596,18 @@ fn genZipLoop(self: *NativeCodegen, target: ast.Node, args: []ast.Node, body: []
 
 /// Generate pass statement (no-op)
 pub fn genPass(self: *NativeCodegen) CodegenError!void {
-    try self.emitIndent();
-    try self.output.appendSlice(self.allocator, "// pass\n");
+    var builder = CodeBuilder.init(self);
+    _ = try builder.line("// pass");
 }
 
 /// Generate break statement
 pub fn genBreak(self: *NativeCodegen) CodegenError!void {
-    try self.emitIndent();
-    try self.output.appendSlice(self.allocator, "break;\n");
+    var builder = CodeBuilder.init(self);
+    _ = try builder.line("break;");
 }
 
 /// Generate continue statement
 pub fn genContinue(self: *NativeCodegen) CodegenError!void {
-    try self.emitIndent();
-    try self.output.appendSlice(self.allocator, "continue;\n");
+    var builder = CodeBuilder.init(self);
+    _ = try builder.line("continue;");
 }

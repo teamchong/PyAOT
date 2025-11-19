@@ -16,7 +16,7 @@ pub fn genLen(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
     const has_magic_method = blk: {
         if (args[0] == .name) {
             // Check all registered classes to see if any have __len__
-            var class_iter = self.classes.iterator();
+            var class_iter = self.class_registry.iterator();
             while (class_iter.next()) |entry| {
                 if (self.classHasMethod(entry.key_ptr.*, "__len__")) {
                     break :blk true;

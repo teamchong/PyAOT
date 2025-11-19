@@ -4,6 +4,7 @@ const ast = @import("../../../ast.zig");
 const NativeCodegen = @import("../main.zig").NativeCodegen;
 const DecoratedFunction = @import("../main.zig").DecoratedFunction;
 const CodegenError = @import("../main.zig").CodegenError;
+const CodeBuilder = @import("../code_builder.zig").CodeBuilder;
 
 /// Check if function returns a lambda (closure)
 fn returnsLambda(body: []ast.Node) bool {
@@ -223,8 +224,8 @@ pub fn genFunctionDef(self: *NativeCodegen, func: ast.Node.FunctionDef) CodegenE
     // Pop scope when exiting function
     self.popScope();
 
-    self.dedent();
-    try self.emit("}\n");
+    var builder = CodeBuilder.init(self);
+    _ = try builder.endBlock();
 
     // Register decorated functions for application in main()
     if (func.decorators.len > 0) {
@@ -252,7 +253,7 @@ pub fn genClassDef(self: *NativeCodegen, class: ast.Node.ClassDef) CodegenError!
     if (class.bases.len > 0) {
         // Look up parent class in registry (populated in Phase 2 of generate())
         // Order doesn't matter - all classes are registered before code generation
-        parent_class = self.classes.get(class.bases[0]);
+        parent_class = self.class_registry.getClass(class.bases[0]);
     }
 
     // Generate: const ClassName = struct {

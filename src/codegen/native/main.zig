@@ -19,6 +19,12 @@ const dispatch = @import("dispatch.zig");
 const statements = @import("statements.zig");
 const expressions = @import("expressions.zig");
 const comptime_eval = @import("../../analysis/comptime_eval.zig");
+const symbol_table_mod = @import("symbol_table.zig");
+const SymbolTable = symbol_table_mod.SymbolTable;
+const ClassRegistry = symbol_table_mod.ClassRegistry;
+const MethodInfo = symbol_table_mod.MethodInfo;
+
+const import_registry = @import("import_registry.zig");
 
 /// Error set for code generation
 pub const CodegenError = error{
@@ -38,11 +44,11 @@ pub const NativeCodegen = struct {
     semantic_info: *SemanticInfo,
     indent_level: usize,
 
-    // Variable scope tracking - stack of scopes (innermost = last)
-    scopes: std.ArrayList(std.StringHashMap(void)),
+    // Symbol table for scope-aware variable tracking
+    symbol_table: *SymbolTable,
 
-    // Class registry for inheritance support - maps class name to ClassDef
-    classes: std.StringHashMap(ast.Node.ClassDef),
+    // Class registry for inheritance support and method lookup
+    class_registry: *ClassRegistry,
 
     // Counter for unique tuple unpacking temporary variables
     unpack_counter: usize,
@@ -78,13 +84,23 @@ pub const NativeCodegen = struct {
     // Track decorated functions for application in main()
     decorated_functions: std.ArrayList(DecoratedFunction),
 
+    // Import registry for Python→Zig module mapping
+    import_registry: *import_registry.ImportRegistry,
+
     pub fn init(allocator: std.mem.Allocator, type_inferrer: *TypeInferrer, semantic_info: *SemanticInfo) !*NativeCodegen {
         const self = try allocator.create(NativeCodegen);
-        var scopes = std.ArrayList(std.StringHashMap(void)){};
 
-        // Initialize with global scope
-        const global_scope = std.StringHashMap(void).init(allocator);
-        try scopes.append(allocator, global_scope);
+        // Create and initialize symbol table
+        const sym_table = try allocator.create(SymbolTable);
+        sym_table.* = SymbolTable.init(allocator);
+
+        // Create and initialize class registry
+        const cls_registry = try allocator.create(ClassRegistry);
+        cls_registry.* = ClassRegistry.init(allocator);
+
+        // Create and initialize import registry
+        const registry = try allocator.create(import_registry.ImportRegistry);
+        registry.* = try import_registry.createDefaultRegistry(allocator);
 
         self.* = .{
             .allocator = allocator,
@@ -92,8 +108,8 @@ pub const NativeCodegen = struct {
             .type_inferrer = type_inferrer,
             .semantic_info = semantic_info,
             .indent_level = 0,
-            .scopes = scopes,
-            .classes = std.StringHashMap(ast.Node.ClassDef).init(allocator),
+            .symbol_table = sym_table,
+            .class_registry = cls_registry,
             .unpack_counter = 0,
             .lambda_counter = 0,
             .lambda_functions = std.ArrayList([]const u8){},
@@ -106,6 +122,7 @@ pub const NativeCodegen = struct {
             .comptime_evaluator = comptime_eval.ComptimeEvaluator.init(allocator),
             .import_ctx = null,
             .decorated_functions = std.ArrayList(DecoratedFunction){},
+            .import_registry = registry,
         };
         return self;
     }
@@ -116,12 +133,11 @@ pub const NativeCodegen = struct {
 
     pub fn deinit(self: *NativeCodegen) void {
         self.output.deinit(self.allocator);
-        // Clean up all scopes
-        for (self.scopes.items) |*scope| {
-            scope.deinit();
-        }
-        self.scopes.deinit(self.allocator);
-        self.classes.deinit();
+        // Clean up symbol table and class registry
+        self.symbol_table.deinit();
+        self.allocator.destroy(self.symbol_table);
+        self.class_registry.deinit();
+        self.allocator.destroy(self.class_registry);
         // Clean up lambda functions
         for (self.lambda_functions.items) |lambda_code| {
             self.allocator.free(lambda_code);
@@ -167,40 +183,32 @@ pub const NativeCodegen = struct {
         // Clean up decorated functions tracking
         self.decorated_functions.deinit(self.allocator);
 
+        // Clean up import registry
+        self.import_registry.deinit();
+        self.allocator.destroy(self.import_registry);
+
         self.allocator.destroy(self);
     }
 
     /// Push new scope (call when entering loop/function/block)
     pub fn pushScope(self: *NativeCodegen) !void {
-        const new_scope = std.StringHashMap(void).init(self.allocator);
-        try self.scopes.append(self.allocator, new_scope);
+        try self.symbol_table.pushScope();
     }
 
     /// Pop scope (call when exiting loop/function/block)
     pub fn popScope(self: *NativeCodegen) void {
-        if (self.scopes.items.len > 0) {
-            const idx = self.scopes.items.len - 1;
-            self.scopes.items[idx].deinit();
-            _ = self.scopes.pop();
-        }
+        self.symbol_table.popScope();
     }
 
     /// Check if variable declared in any scope (innermost to outermost)
     pub fn isDeclared(self: *NativeCodegen, name: []const u8) bool {
-        var i: usize = self.scopes.items.len;
-        while (i > 0) {
-            i -= 1;
-            if (self.scopes.items[i].contains(name)) return true;
-        }
-        return false;
+        return self.symbol_table.lookup(name) != null;
     }
 
     /// Declare variable in current (innermost) scope
     pub fn declareVar(self: *NativeCodegen, name: []const u8) !void {
-        if (self.scopes.items.len > 0) {
-            const current_scope = &self.scopes.items[self.scopes.items.len - 1];
-            try current_scope.put(name, {});
-        }
+        // Use unknown type for now - type inference happens separately
+        try self.symbol_table.declare(name, NativeType.int, true);
     }
 
     /// Check if variable holds a constant array (vs ArrayList)
@@ -340,34 +348,41 @@ pub const NativeCodegen = struct {
         try file.writeAll(zig_code);
     }
 
-    /// Scan AST for import statements and collect module names
-    fn collectImports(module: ast.Node.Module, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
+    /// Scan AST for import statements and collect module names with registry lookup
+    fn collectImports(self: *NativeCodegen, module: ast.Node.Module) !std.ArrayList([]const u8) {
         var imports = std.ArrayList([]const u8){};
 
-        const stdlib = [_][]const u8{
-            "pytest", "unittest", "sys", "os", "math", "json",
-            "re", "itertools", "functools", "collections",
-            "typing", "abc", "enum", "dataclasses", "asyncio",
-        };
+        // Collect unique Python module names from import statements
+        var module_names = std.StringHashMap(void).init(self.allocator);
+        defer module_names.deinit();
 
         for (module.body) |stmt| {
             if (stmt == .import_stmt) {
                 const module_name = stmt.import_stmt.module;
+                try module_names.put(module_name, {});
+            }
+        }
 
-                // Skip stdlib modules
-                var is_stdlib = false;
-                for (stdlib) |mod| {
-                    if (std.mem.eql(u8, module_name, mod)) {
-                        is_stdlib = true;
-                        break;
-                    }
+        // Process each module using registry
+        var iter = module_names.keyIterator();
+        while (iter.next()) |python_module| {
+            if (self.import_registry.lookup(python_module.*)) |info| {
+                switch (info.strategy) {
+                    .zig_runtime, .c_library => {
+                        // Include modules with Zig implementations
+                        try imports.append(self.allocator, python_module.*);
+                    },
+                    .compile_python => {
+                        // Include for compilation (will be handled in generate())
+                        try imports.append(self.allocator, python_module.*);
+                    },
+                    .unsupported => {
+                        std.debug.print("Warning: Module {s} not supported yet\n", .{python_module.*});
+                    },
                 }
-
-                // Include C library modules in imports (they will be mapped to c_interop/*.zig)
-                // Only skip standard library modules
-                if (!is_stdlib) {
-                    try imports.append(allocator, module_name);
-                }
+            } else {
+                // Module not in registry - assume it's a user module
+                try imports.append(self.allocator, python_module.*);
             }
         }
 
@@ -380,7 +395,7 @@ pub const NativeCodegen = struct {
         const analysis = try analyzer.analyzeModule(module, self.allocator);
 
         // PHASE 1.5: Collect imports and compile imported modules
-        var imported_modules = try collectImports(module, self.allocator);
+        var imported_modules = try self.collectImports(module);
         defer imported_modules.deinit(self.allocator);
 
         // Compile each imported module to .zig file
@@ -391,7 +406,7 @@ pub const NativeCodegen = struct {
         // PHASE 2: Register all classes for inheritance support
         for (module.body) |stmt| {
             if (stmt == .class_def) {
-                try self.classes.put(stmt.class_def.name, stmt.class_def);
+                try self.class_registry.registerClass(stmt.class_def.name, stmt.class_def);
             }
         }
 
@@ -412,27 +427,46 @@ pub const NativeCodegen = struct {
             }
         }
 
-        // Add user module imports
-        const library_map = std.StaticStringMap([]const u8).initComptime(.{
-            .{ "numpy", "c_interop/numpy.zig" },
-            .{ "pandas", "c_interop/pandas.zig" },
-            .{ "sqlite3", "c_interop/sqlite3.zig" },
-            .{ "zlib", "c_interop/zlib.zig" },
-            .{ "ssl", "c_interop/zlib.zig" },
-        });
-
+        // Add user module imports using registry
         for (imported_modules.items) |mod_name| {
             try self.emit("const ");
             try self.emit(mod_name);
-            try self.emit(" = @import(\"");
-            // Check if this is a C library import
-            if (library_map.get(mod_name)) |zig_path| {
-                try self.emit(zig_path);
+            try self.emit(" = ");
+
+            // Look up module in registry
+            if (self.import_registry.lookup(mod_name)) |info| {
+                switch (info.strategy) {
+                    .zig_runtime, .c_library => {
+                        // Use Zig import from registry
+                        if (info.zig_import) |zig_import| {
+                            try self.emit(zig_import);
+                        } else {
+                            // Fallback to user module
+                            try self.emit("@import(\"");
+                            try self.emit(mod_name);
+                            try self.emit(".zig\")");
+                        }
+                    },
+                    .compile_python => {
+                        // Import compiled Python module
+                        try self.emit("@import(\"");
+                        try self.emit(mod_name);
+                        try self.emit(".zig\")");
+                    },
+                    .unsupported => {
+                        // Generate comment for unsupported modules
+                        try self.emit("struct {}; // TODO: ");
+                        try self.emit(mod_name);
+                        try self.emit(" not supported yet");
+                    },
+                }
             } else {
+                // Module not in registry - assume user module
+                try self.emit("@import(\"");
                 try self.emit(mod_name);
-                try self.emit(".zig");
+                try self.emit(".zig\")");
             }
-            try self.emit("\");\n");
+            try self.emit(";\n");
         }
 
         try self.emit("\n");
@@ -619,19 +653,21 @@ pub const NativeCodegen = struct {
     /// Check if a class has a specific method (e.g., __getitem__, __len__)
     /// Used for magic method dispatch
     pub fn classHasMethod(self: *NativeCodegen, class_name: []const u8, method_name: []const u8) bool {
-        // Look up class definition in the classes registry
-        const class_def = self.classes.get(class_name) orelse return false;
+        return self.class_registry.hasMethod(class_name, method_name);
+    }
 
-        // Search for method in class body
-        for (class_def.body) |stmt| {
-            if (stmt == .function_def) {
-                if (std.mem.eql(u8, stmt.function_def.name, method_name)) {
-                    return true;
-                }
-            }
-        }
+    /// Get symbol's type from type inferrer
+    pub fn getSymbolType(self: *NativeCodegen, name: []const u8) ?NativeType {
+        return self.type_inferrer.var_types.get(name);
+    }
 
-        return false;
+    /// Find method in class (searches inheritance chain)
+    pub fn findMethod(
+        self: *NativeCodegen,
+        class_name: []const u8,
+        method_name: []const u8,
+    ) ?MethodInfo {
+        return self.class_registry.findMethod(class_name, method_name);
     }
 
     /// Get the class name from a variable's type
@@ -647,5 +683,31 @@ pub const NativeCodegen = struct {
             return null; // Simplified for now
         }
         return null;
+    }
+
+    /// Check if a Python module should use Zig runtime
+    pub fn useZigRuntime(self: *NativeCodegen, python_module: []const u8) bool {
+        if (self.import_registry.lookup(python_module)) |info| {
+            return info.strategy == .zig_runtime;
+        }
+        return false;
+    }
+
+    /// Check if a Python module uses C library
+    pub fn usesCLibrary(self: *NativeCodegen, python_module: []const u8) bool {
+        if (self.import_registry.lookup(python_module)) |info| {
+            return info.strategy == .c_library;
+        }
+        return false;
+    }
+
+    /// Register a new Python→Zig mapping at runtime
+    pub fn registerImport(
+        self: *NativeCodegen,
+        python_module: []const u8,
+        strategy: import_registry.ImportStrategy,
+        zig_import: ?[]const u8,
+    ) !void {
+        try self.import_registry.register(python_module, strategy, zig_import, null);
     }
 };
