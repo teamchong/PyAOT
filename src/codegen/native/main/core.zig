@@ -70,6 +70,9 @@ pub const NativeCodegen = struct {
     // Track which variables hold array slices (result of slicing a constant array)
     array_slice_vars: std.StringHashMap(void),
 
+    // Track which classes have mutating methods (need var instances, not const)
+    mutable_classes: std.StringHashMap(void),
+
     // Compile-time evaluator for constant folding
     comptime_evaluator: comptime_eval.ComptimeEvaluator,
 
@@ -122,6 +125,7 @@ pub const NativeCodegen = struct {
             .hoisted_vars = std.StringHashMap(void).init(allocator),
             .array_vars = std.StringHashMap(void).init(allocator),
             .array_slice_vars = std.StringHashMap(void).init(allocator),
+            .mutable_classes = std.StringHashMap(void).init(allocator),
             .comptime_evaluator = comptime_eval.ComptimeEvaluator.init(allocator),
             .import_ctx = null,
             .decorated_functions = std.ArrayList(DecoratedFunction){},

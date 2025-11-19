@@ -104,11 +104,12 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
         return;
     }
 
-    // Check if any arg is string concatenation, allocating method call, list, tuple, bool, or float
+    // Check if any arg is string concatenation, allocating method call, list, tuple, dict, bool, or float
     var has_string_concat = false;
     var has_allocating_call = false;
     var has_list = false;
     var has_tuple = false;
+    var has_dict = false;
     var has_bool = false;
     var has_float = false;
     for (args) |arg| {
@@ -130,6 +131,9 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
         if (arg_type == .tuple) {
             has_tuple = true;
         }
+        if (arg_type == .dict) {
+            has_dict = true;
+        }
         if (arg_type == .bool) {
             has_bool = true;
         }
@@ -138,8 +142,8 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
         }
     }
 
-    // If we have lists, tuples, or bools, handle them specially with custom formatting
-    if (has_list or has_tuple or has_bool) {
+    // If we have lists, tuples, dicts, or bools, handle them specially with custom formatting
+    if (has_list or has_tuple or has_dict or has_bool) {
         // For lists, we need to print in Python format: [elem1, elem2, ...]
         for (args, 0..) |arg, i| {
             const arg_type = try self.type_inferrer.inferExpr(arg);
@@ -197,6 +201,16 @@ pub fn genPrint(self: *NativeCodegen, args: []ast.Node) CodegenError!void {
                     }
                 }
                 try self.output.appendSlice(self.allocator, "    std.debug.print(\")\", .{});\n");
+                try self.output.appendSlice(self.allocator, "}\n");
+            } else if (arg_type == .dict) {
+                // Format dict as Python dict string: {key: value, ...}
+                try self.output.appendSlice(self.allocator, "{\n");
+                try self.output.appendSlice(self.allocator, "    const __dict = ");
+                try self.genExpr(arg);
+                try self.output.appendSlice(self.allocator, ";\n");
+                try self.output.appendSlice(self.allocator, "    const __dict_str = try runtime.PyDict_AsString(__dict, allocator);\n");
+                try self.output.appendSlice(self.allocator, "    defer allocator.free(__dict_str);\n");
+                try self.output.appendSlice(self.allocator, "    std.debug.print(\"{s}\", .{__dict_str});\n");
                 try self.output.appendSlice(self.allocator, "}\n");
             } else if (arg_type == .bool) {
                 // Print booleans as Python-style True/False

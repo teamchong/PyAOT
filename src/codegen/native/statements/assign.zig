@@ -194,10 +194,22 @@ pub fn genAssign(self: *NativeCodegen, assign: ast.Node.Assign) CodegenError!voi
                 // First assignment: decide between const and var
                 // ArrayLists and dicts need var (for mutation and deinit)
                 // Dictcomps return immutable HashMaps, so they don't need var
-                // Class instances can be const - methods mutate through *self, not by reassigning the instance
+                // Class instances need var if they have mutating methods
                 // Default to const for all other types
                 // NOTE: Semantic analyzer's isMutated() has false positives, so we don't use it for now
-                const needs_var = is_arraylist or is_dict;
+
+                // Check if this is a mutable class instantiation (has methods that mutate self)
+                const is_mutable_class_instance = blk: {
+                    if (assign.value.* != .call) break :blk false;
+                    if (assign.value.call.func.* != .name) break :blk false;
+                    const func_name = assign.value.call.func.name.id;
+                    if (func_name.len == 0) break :blk false;
+                    // Check if it's a class (uppercase) and has mutating methods
+                    if (!std.ascii.isUpper(func_name[0])) break :blk false;
+                    break :blk self.mutable_classes.contains(func_name);
+                };
+
+                const needs_var = is_arraylist or is_dict or is_mutable_class_instance;
 
                 if (needs_var) {
                     try self.output.appendSlice(self.allocator, "var ");

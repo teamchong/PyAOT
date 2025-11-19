@@ -338,6 +338,32 @@ pub const now = async_runtime.now;
 pub const jsonLoads = json.loads;
 pub const jsonDumps = json.dumps;
 
+/// Format StringHashMap as Python dict string: {key: value, ...}
+/// Used for printing dict comprehensions
+pub fn PyDict_AsString(dict: anytype, allocator: std.mem.Allocator) ![]const u8 {
+    var buf = std.ArrayList(u8){};
+    try buf.appendSlice(allocator, "{");
+
+    var it = dict.iterator();
+    var first = true;
+    while (it.next()) |entry| {
+        if (!first) {
+            try buf.appendSlice(allocator, ", ");
+        }
+
+        // Format key and value
+        try buf.writer(allocator).print("{s}: {d}", .{
+            entry.key_ptr.*,
+            entry.value_ptr.*,
+        });
+
+        first = false;
+    }
+
+    try buf.appendSlice(allocator, "}");
+    return try buf.toOwnedSlice(allocator);
+}
+
 // Tests
 test "PyInt creation and retrieval" {
     const allocator = std.testing.allocator;

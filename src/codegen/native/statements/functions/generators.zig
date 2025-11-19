@@ -326,6 +326,24 @@ pub fn genClassDef(self: *NativeCodegen, class: ast.Node.ClassDef) CodegenError!
         }
     }
 
+    // Check if this class has any mutating methods (excluding __init__)
+    // If so, track it in mutable_classes so instances use `var` not `const`
+    var has_mutating_method = false;
+    for (class.body) |stmt| {
+        if (stmt == .function_def) {
+            const method = stmt.function_def;
+            if (std.mem.eql(u8, method.name, "__init__")) continue;
+            if (methodMutatesSelf(method)) {
+                has_mutating_method = true;
+                break;
+            }
+        }
+    }
+    if (has_mutating_method) {
+        const class_name_copy = try self.allocator.dupe(u8, class.name);
+        try self.mutable_classes.put(class_name_copy, {});
+    }
+
     // Generate regular methods (non-__init__)
     for (class.body) |stmt| {
         if (stmt == .function_def) {
