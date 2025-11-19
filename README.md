@@ -148,17 +148,17 @@ Benchmarked with [hyperfine](https://github.com/sharkdp/hyperfine) on macOS ARM6
 
 All benchmarks run ~60 seconds on CPython for statistical significance.
 
-| Benchmark | CPython | PyPy | PyAOT | vs CPython | vs PyPy |
-|:----------|--------:|-----:|------:|-----------:|--------:|
-| **Loop Sum (1.4B)** | ~60s | 2.1s | 1.5s | **28x faster** 🚀 | **1.4x faster** |
-| **Fibonacci(45)** | ~60s | 7.6s | 4.4s | **14x faster** 🚀 | **1.7x faster** |
-| **String Concat (650M)** | ~60s | 1.5s | TBD | **TBD** | TBD |
+| Benchmark | CPython | PyAOT | Speedup |
+|:----------|--------:|------:|--------:|
+| **Fibonacci(40)** | 8.76s | 1.06s | **8.3x faster** 🚀 |
+| **JSON Parsing** | ~100ms | ~2.5ms | **40x faster** 🚀 |
+| **Startup Time** | ~20ms | <1ms | **20x faster** 🚀 |
 
 **Performance highlights:**
-- **Loop sum:** 28x faster than CPython, 1.4x faster than PyPy
-- **Recursive fibonacci:** 14x faster than CPython, 1.7x faster than PyPy
-- **Range:** 14-28x speedup vs CPython on computational tasks
-- **AOT vs JIT:** PyAOT beats PyPy's JIT compiler on most benchmarks
+- **Fibonacci:** 8.3x faster on recursive computation
+- **JSON:** 40x faster with SIMD-optimized parsing
+- **Startup:** 20x faster instant binary execution
+- **Range:** 8-40x speedup vs CPython depending on workload
 
 **Why PyAOT is faster:**
 - Direct compilation to native machine code via Zig (no interpreter)
@@ -184,7 +184,7 @@ Detailed methodology and results: [benchmarks/RESULTS.md](benchmarks/RESULTS.md)
 
 ## Features
 
-### ✅ Implemented (101/142 tests passing - 71.1%)
+### ✅ Implemented (78/144 tests passing - 54%)
 
 **Core Language:**
 - ✅ Function definitions with return values
@@ -192,8 +192,17 @@ Detailed methodology and results: [benchmarks/RESULTS.md](benchmarks/RESULTS.md)
 - ✅ Control flow (if/else, while, for loops)
 - ✅ Variable reassignment detection (var vs const)
 - ✅ Tuples with element type tracking
-- ✅ Import/module system (6/8 tests passing)
-- ✅ Exception handling (`try/except` - basic support)
+- ✅ F-strings (full lexer → parser → codegen)
+- ✅ Lambdas and closures
+
+**Import System (NEW!):**
+- ✅ Local module imports (`import mymodule`)
+- ✅ Package support with `__init__.py`
+- ✅ Nested submodules (`package.submod.function()`)
+- ✅ Site-packages discovery
+- ✅ Stdlib discovery
+- ✅ Single-file bundling (Bun-style nested structs)
+- ✅ Variable type tracking from module calls
 
 **Data Types:**
 - ✅ Lists (literals, indexing, slicing, comprehensions)
