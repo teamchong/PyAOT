@@ -74,6 +74,7 @@ pub const TokenType = enum {
     Colon,
     Dot,
     Arrow,
+    At,
 
     // Indentation
     Indent,

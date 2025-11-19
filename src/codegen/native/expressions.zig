@@ -165,9 +165,14 @@ fn genCall(self: *NativeCodegen, call: ast.Node.Call) CodegenError!void {
 
         // If name starts with uppercase, it's a class constructor
         if (func_name.len > 0 and std.ascii.isUpper(func_name[0])) {
-            // Class instantiation: Counter(10) -> Counter.init(10)
+            // Class instantiation: Counter(10) -> Counter.init(allocator, 10)
             try self.output.appendSlice(self.allocator, func_name);
-            try self.output.appendSlice(self.allocator, ".init(");
+            try self.output.appendSlice(self.allocator, ".init(allocator");
+
+            // Add comma if there are args
+            if (call.args.len > 0) {
+                try self.output.appendSlice(self.allocator, ", ");
+            }
 
             for (call.args, 0..) |arg, i| {
                 if (i > 0) try self.output.appendSlice(self.allocator, ", ");

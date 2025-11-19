@@ -70,6 +70,9 @@ pub const NativeType = union(enum) {
         return_type: *const NativeType,
     }, // Function pointer type: *const fn(T, U) R
 
+    // Library types (DEPRECATED - remove after implementing Python classes properly)
+    dataframe: void, // DEPRECATED: pandas.DataFrame - should be generic class type
+
     // Special
     none: void, // void or ?T
     unknown: void, // Fallback to PyObject* (should be rare)
@@ -118,6 +121,7 @@ pub const NativeType = union(enum) {
                 try buf.appendSlice(allocator, ") ");
                 try fn_type.return_type.toZigType(allocator, buf);
             },
+            .dataframe => try buf.appendSlice(allocator, "pandas.DataFrame"),
             .none => try buf.appendSlice(allocator, "void"),
             .unknown => try buf.appendSlice(allocator, "*runtime.PyObject"),
         }
@@ -563,6 +567,16 @@ pub const TypeInferrer = struct {
         // Check if this is a method call (attribute access)
         if (call.func.* == .attribute) {
             const attr = call.func.attribute;
+
+            // Check for pandas.DataFrame() or pd.DataFrame()
+            if (attr.value.* == .name) {
+                const module_name = attr.value.name.id;
+                if ((std.mem.eql(u8, module_name, "pandas") or std.mem.eql(u8, module_name, "pd")) and
+                    std.mem.eql(u8, attr.attr, "DataFrame")) {
+                    return .dataframe;
+                }
+            }
+
             const obj_type = try self.inferExpr(attr.value.*);
 
             // String methods that return strings
@@ -618,6 +632,25 @@ pub const TypeInferrer = struct {
                     const tuple_ptr = try self.allocator.create(NativeType);
                     tuple_ptr.* = .{ .tuple = tuple_types };
                     return .{ .list = tuple_ptr };
+                }
+            }
+
+            // DataFrame Column methods (when accessing df['col'].method())
+            // Column methods return float (sum, mean, min, max, std)
+            if (obj_type == .dataframe or
+                (attr.value.* == .subscript and
+                 try self.inferExpr(attr.value.subscript.value.*) == .dataframe)) {
+                const column_methods = [_][]const u8{
+                    "sum", "mean", "min", "max", "std",
+                };
+                for (column_methods) |method| {
+                    if (std.mem.eql(u8, attr.attr, method)) {
+                        return .float;
+                    }
+                }
+                // describe() returns a struct with stats (treat as unknown for now)
+                if (std.mem.eql(u8, attr.attr, "describe")) {
+                    return .unknown;
                 }
             }
         }

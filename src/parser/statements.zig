@@ -571,5 +571,29 @@ pub fn parseImportFrom(self: *Parser) ParseError!ast.Node {
         return ast.Node{ .continue_stmt = {} };
     }
 
+    pub fn parseDecorated(self: *Parser) ParseError!ast.Node {
+        // Parse decorators: @decorator_name or @decorator_func(args)
+        var decorators = std.ArrayList(ast.Node){};
+        defer decorators.deinit(self.allocator);
+
+        while (self.match(.At)) {
+            // Parse decorator expression (name or call)
+            const decorator = try self.parseExpression();
+            try decorators.append(self.allocator, decorator);
+            _ = try self.expect(.Newline);
+        }
+
+        // Parse the decorated function/class
+        const decorated_node = try self.parseStatement();
+
+        // Transform: @dec def f(): ... => f = dec(f)
+        // For simplicity, we'll just return the function and handle decoration in codegen
+        // Store decorators as assignments after the function
+
+        // For now, just return the function definition
+        // TODO: Apply decorators by generating wrapper assignments
+        return decorated_node;
+    }
+
     // ===== Expression Parsing =====
 

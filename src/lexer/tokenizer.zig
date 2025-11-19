@@ -218,6 +218,7 @@ pub fn tokenizeOperatorOrDelimiter(self: *Lexer, start: usize, start_column: usi
         '&' => .Ampersand,
         '|' => .Pipe,
         '^' => .Caret,
+        '@' => .At,
         else => return null,
     };
 

@@ -51,12 +51,19 @@ pub fn genSliceIndex(self: *NativeCodegen, node: ast.Node, in_slice_context: boo
 pub fn genSubscript(self: *NativeCodegen, subscript: ast.Node.Subscript) CodegenError!void {
     switch (subscript.slice) {
         .index => {
-            // Check if this is a dict or list subscript
+            // Check if this is a dict, list, or dataframe subscript
             const value_type = try self.type_inferrer.inferExpr(subscript.value.*);
             const is_dict = (value_type == .dict);
             const is_list = (value_type == .list);
+            const is_dataframe = (value_type == .dataframe);
 
-            if (is_dict) {
+            if (is_dataframe) {
+                // DataFrame column access: df['col'] → df.getColumn("col").?
+                try genExpr(self, subscript.value.*);
+                try self.output.appendSlice(self.allocator, ".getColumn(");
+                try genExpr(self, subscript.slice.index.*);
+                try self.output.appendSlice(self.allocator, ").?");
+            } else if (is_dict) {
                 // Dict access: use .get(key).?
                 try genExpr(self, subscript.value.*);
                 try self.output.appendSlice(self.allocator, ".get(");

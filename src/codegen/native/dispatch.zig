@@ -10,6 +10,7 @@ const json = @import("json.zig");
 const http = @import("http.zig");
 const async_mod = @import("async.zig");
 const numpy_mod = @import("numpy.zig");
+const pandas_mod = @import("pandas.zig");
 const builtins = @import("builtins.zig");
 const methods = @import("methods.zig");
 
@@ -122,6 +123,14 @@ pub fn dispatchCall(self: *NativeCodegen, call: ast.Node.Call) CodegenError!bool
                 }
                 if (std.mem.eql(u8, func_name, "ones")) {
                     try numpy_mod.genOnes(self, call.args);
+                    return true;
+                }
+            }
+
+            // Pandas module functions
+            if (std.mem.eql(u8, module_name, "pandas") or std.mem.eql(u8, module_name, "pd")) {
+                if (std.mem.eql(u8, func_name, "DataFrame")) {
+                    try pandas_mod.genDataFrame(self, call.args);
                     return true;
                 }
             }
@@ -254,6 +263,40 @@ pub fn dispatchCall(self: *NativeCodegen, call: ast.Node.Call) CodegenError!bool
         if (std.mem.eql(u8, method_name, "items")) {
             try methods.genItems(self, call.func.attribute.value.*, call.args);
             return true;
+        }
+
+        // Pandas Column methods (DataFrame column operations)
+        // Check if the object is a DataFrame column by looking for subscript on DataFrame
+        const is_column_method = blk: {
+            const obj = call.func.attribute.value.*;
+            break :blk obj == .subscript; // df['col'].method()
+        };
+
+        if (is_column_method) {
+            if (std.mem.eql(u8, method_name, "sum")) {
+                try pandas_mod.genColumnSum(self, call.func.attribute.value.*);
+                return true;
+            }
+            if (std.mem.eql(u8, method_name, "mean")) {
+                try pandas_mod.genColumnMean(self, call.func.attribute.value.*);
+                return true;
+            }
+            if (std.mem.eql(u8, method_name, "describe")) {
+                try pandas_mod.genColumnDescribe(self, call.func.attribute.value.*);
+                return true;
+            }
+            if (std.mem.eql(u8, method_name, "min")) {
+                try pandas_mod.genColumnMin(self, call.func.attribute.value.*);
+                return true;
+            }
+            if (std.mem.eql(u8, method_name, "max")) {
+                try pandas_mod.genColumnMax(self, call.func.attribute.value.*);
+                return true;
+            }
+            if (std.mem.eql(u8, method_name, "std")) {
+                try pandas_mod.genColumnStd(self, call.func.attribute.value.*);
+                return true;
+            }
         }
     }
 

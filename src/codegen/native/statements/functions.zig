@@ -256,15 +256,13 @@ pub fn genClassDef(self: *NativeCodegen, class: ast.Node.ClassDef) CodegenError!
     if (init_method) |init| {
         try self.output.appendSlice(self.allocator, "\n");
         try self.emitIndent();
-        try self.output.writer(self.allocator).print("pub fn init(", .{});
+        try self.output.writer(self.allocator).print("pub fn init(allocator: std.mem.Allocator", .{});
 
         // Parameters (skip 'self')
-        var first = true;
         for (init.args) |arg| {
             if (std.mem.eql(u8, arg.name, "self")) continue;
 
-            if (!first) try self.output.appendSlice(self.allocator, ", ");
-            first = false;
+            try self.output.appendSlice(self.allocator, ", ");
 
             try self.output.writer(self.allocator).print("{s}: ", .{arg.name});
 
@@ -275,6 +273,10 @@ pub fn genClassDef(self: *NativeCodegen, class: ast.Node.ClassDef) CodegenError!
 
         try self.output.writer(self.allocator).print(") {s} {{\n", .{class.name});
         self.indent();
+
+        // Mark allocator as potentially unused (suppress Zig warning)
+        try self.emitIndent();
+        try self.output.appendSlice(self.allocator, "_ = allocator;\n");
 
         // Generate return statement with field initializers
         try self.emitIndent();

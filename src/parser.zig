@@ -122,6 +122,7 @@ pub const Parser = struct {
         // Try to determine statement type
         if (self.peek()) |tok| {
             switch (tok.type) {
+                .At => return try statements.parseDecorated(self),
                 .Async => return try statements.parseFunctionDef(self),
                 .Def => return try statements.parseFunctionDef(self),
                 .Class => return try statements.parseClassDef(self),

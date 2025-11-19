@@ -402,6 +402,7 @@ pub const NativeCodegen = struct {
         // Add user module imports
         const library_map = std.StaticStringMap([]const u8).initComptime(.{
             .{ "numpy", "c_interop/numpy.zig" },
+            .{ "pandas", "c_interop/pandas.zig" },
             .{ "sqlite3", "c_interop/sqlite3.zig" },
             .{ "zlib", "c_interop/zlib.zig" },
             .{ "ssl", "c_interop/zlib.zig" },

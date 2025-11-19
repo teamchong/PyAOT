@@ -197,6 +197,11 @@ fn analyzeExpr(node: ast.Node) !ModuleAnalysis {
                         break;
                     }
                 }
+
+                // Check for class instantiation (uppercase first letter)
+                if (func_name.len > 0 and std.ascii.isUpper(func_name[0])) {
+                    analysis.needs_allocator = true;
+                }
             }
 
             // Analyze function arguments
