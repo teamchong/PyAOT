@@ -8,19 +8,27 @@ const imports = @import("imports.zig");
 const analyzer = @import("../analyzer.zig");
 const statements = @import("../statements.zig");
 const expressions = @import("../expressions.zig");
+const import_resolver = @import("../../../import_resolver.zig");
 
 /// Generate native Zig code for module
 pub fn generate(self: *NativeCodegen, module: ast.Node.Module) ![]const u8 {
     // PHASE 1: Analyze module to determine requirements
     const analysis = try analyzer.analyzeModule(module, self.allocator);
 
-    // PHASE 1.5: Collect imports and compile imported modules
-    var imported_modules = try imports.collectImports(self, module);
+    // PHASE 1.5: Get source file directory for import resolution
+    const source_file_dir = if (self.source_file_path) |path|
+        try import_resolver.getFileDirectory(path, self.allocator)
+    else
+        null;
+    defer if (source_file_dir) |dir| self.allocator.free(dir);
+
+    // PHASE 1.6: Collect imports and compile imported modules
+    var imported_modules = try imports.collectImports(self, module, source_file_dir);
     defer imported_modules.deinit(self.allocator);
 
     // Compile each imported module to .zig file
     for (imported_modules.items) |mod_name| {
-        try imports.compileModuleToZig(mod_name, self.allocator);
+        try imports.compileModuleToZig(mod_name, source_file_dir, self.allocator);
     }
 
     // PHASE 2: Register all classes for inheritance support
@@ -157,7 +165,7 @@ pub fn generate(self: *NativeCodegen, module: ast.Node.Module) ![]const u8 {
 
     // Setup allocator (always available for float formatting in print)
     try self.emitIndent();
-    try self.emit("var gpa = std.heap.GeneralPurposeAllocator(.{}){};\n");
+    try self.emit("var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = false }){};\n");
     try self.emitIndent();
     try self.emit("defer _ = gpa.deinit();\n");
     try self.emitIndent();

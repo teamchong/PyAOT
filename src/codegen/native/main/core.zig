@@ -79,6 +79,9 @@ pub const NativeCodegen = struct {
     // C library import context (for numpy, etc.)
     import_ctx: ?*const @import("c_interop").ImportContext,
 
+    // Source file path (for resolving relative imports)
+    source_file_path: ?[]const u8,
+
     // Track decorated functions for application in main()
     decorated_functions: std.ArrayList(DecoratedFunction),
 
@@ -128,6 +131,7 @@ pub const NativeCodegen = struct {
             .mutable_classes = std.StringHashMap(void).init(allocator),
             .comptime_evaluator = comptime_eval.ComptimeEvaluator.init(allocator),
             .import_ctx = null,
+            .source_file_path = null,
             .decorated_functions = std.ArrayList(DecoratedFunction){},
             .import_registry = registry,
             .from_imports = std.ArrayList(FromImportInfo){},
@@ -138,6 +142,10 @@ pub const NativeCodegen = struct {
 
     pub fn setImportContext(self: *NativeCodegen, ctx: *const @import("c_interop").ImportContext) void {
         self.import_ctx = ctx;
+    }
+
+    pub fn setSourceFilePath(self: *NativeCodegen, path: []const u8) void {
+        self.source_file_path = path;
     }
 
     pub fn deinit(self: *NativeCodegen) void {

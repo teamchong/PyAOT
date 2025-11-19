@@ -248,6 +248,9 @@ pub fn compileFile(allocator: std.mem.Allocator, opts: CompileOptions) !void {
     // Pass import context to codegen
     native_gen.setImportContext(&import_ctx);
 
+    // Set source file path for import resolution
+    native_gen.setSourceFilePath(opts.input_file);
+
     const zig_code = try native_gen.generate(tree.module);
     defer allocator.free(zig_code);
 

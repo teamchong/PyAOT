@@ -4,22 +4,26 @@ const ast = @import("../../../ast.zig");
 const core = @import("core.zig");
 const NativeCodegen = core.NativeCodegen;
 const statements = @import("../statements.zig");
+const import_resolver = @import("../../../import_resolver.zig");
 
 /// Compile a Python module to a Zig module file
-pub fn compileModuleToZig(module_name: []const u8, allocator: std.mem.Allocator) !void {
-    // Find the .py file (in same directory or examples/)
-    var py_path_buf: [1024]u8 = undefined;
-    const py_path = blk: {
-        // Try current directory
-        const path1 = std.fmt.bufPrint(&py_path_buf, "{s}.py", .{module_name}) catch return;
-        std.fs.cwd().access(path1, .{}) catch {
-            // Try examples directory
-            const path2 = std.fmt.bufPrint(&py_path_buf, "examples/{s}.py", .{module_name}) catch return;
-            std.fs.cwd().access(path2, .{}) catch return; // Module not found
-            break :blk path2;
-        };
-        break :blk path1;
+/// Returns error if module .py file cannot be found
+pub fn compileModuleToZig(
+    module_name: []const u8,
+    source_file_dir: ?[]const u8,
+    allocator: std.mem.Allocator,
+) !void {
+    // Use import resolver to find the .py file
+    const py_path = try import_resolver.resolveImport(module_name, source_file_dir, allocator) orelse {
+        std.debug.print("Error: Cannot find module '{s}.py'\n", .{module_name});
+        std.debug.print("Searched in: ", .{});
+        if (source_file_dir) |dir| {
+            std.debug.print("{s}/, ", .{dir});
+        }
+        std.debug.print("./, examples/\n", .{});
+        return error.ModuleNotFound;
     };
+    defer allocator.free(py_path);
 
     // Read source
     const source = try std.fs.cwd().readFileAlloc(allocator, py_path, 10 * 1024 * 1024);
@@ -133,7 +137,12 @@ pub fn compileModuleToZig(module_name: []const u8, allocator: std.mem.Allocator)
 }
 
 /// Scan AST for import statements and collect module names with registry lookup
-pub fn collectImports(self: *NativeCodegen, module: ast.Node.Module) !std.ArrayList([]const u8) {
+/// Returns list of modules that need to be compiled from Python source
+pub fn collectImports(
+    self: *NativeCodegen,
+    module: ast.Node.Module,
+    source_file_dir: ?[]const u8,
+) !std.ArrayList([]const u8) {
     var imports = std.ArrayList([]const u8){};
 
     // Collect unique Python module names from import statements
@@ -183,9 +192,20 @@ pub fn collectImports(self: *NativeCodegen, module: ast.Node.Module) !std.ArrayL
                 },
             }
         } else {
-            // Module not in registry - warn and assume user module
-            std.debug.print("Warning: Module '{s}' not in registry, assuming user module\n", .{python_module.*});
-            try imports.append(self.allocator, python_module.*);
+            // Module not in registry - check if it's a local .py file
+            const is_local = try import_resolver.isLocalModule(
+                python_module.*,
+                source_file_dir,
+                self.allocator,
+            );
+
+            if (is_local) {
+                // Local user module - add to imports list for compilation
+                try imports.append(self.allocator, python_module.*);
+            } else {
+                // External package not in registry - skip with warning
+                std.debug.print("Warning: External module '{s}' not found, skipping import\n", .{python_module.*});
+            }
         }
     }
 
