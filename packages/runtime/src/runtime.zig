@@ -338,26 +338,52 @@ pub const now = async_runtime.now;
 pub const jsonLoads = json.loads;
 pub const jsonDumps = json.dumps;
 
-/// Format StringHashMap as Python dict string: {key: value, ...}
-/// Used for printing dict comprehensions
+/// Format dict as Python dict string: {key: value, ...}
+/// Supports both StringHashMap and ArrayList(KV) for dict comprehensions
+/// ArrayList preserves insertion order (Python 3.7+ behavior)
 pub fn PyDict_AsString(dict: anytype, allocator: std.mem.Allocator) ![]const u8 {
     var buf = std.ArrayList(u8){};
     try buf.appendSlice(allocator, "{");
 
-    var it = dict.iterator();
-    var first = true;
-    while (it.next()) |entry| {
-        if (!first) {
-            try buf.appendSlice(allocator, ", ");
+    const T = @TypeOf(dict);
+    const type_info = @typeInfo(T);
+
+    // Check if it's an ArrayList by checking for 'items' field
+    const is_arraylist = comptime blk: {
+        if (type_info == .@"struct") {
+            if (@hasDecl(T, "Slice")) {
+                // It's likely an ArrayList
+                break :blk true;
+            }
         }
+        break :blk false;
+    };
 
-        // Format key and value
-        try buf.writer(allocator).print("{s}: {d}", .{
-            entry.key_ptr.*,
-            entry.value_ptr.*,
-        });
+    if (is_arraylist) {
+        // ArrayList(KV) - iterate in order
+        for (dict.items, 0..) |item, i| {
+            if (i > 0) {
+                try buf.appendSlice(allocator, ", ");
+            }
+            try buf.writer(allocator).print("{s}: {d}", .{ item.key, item.value });
+        }
+    } else {
+        // StringHashMap - iterate in hash order
+        var it = dict.iterator();
+        var first = true;
+        while (it.next()) |entry| {
+            if (!first) {
+                try buf.appendSlice(allocator, ", ");
+            }
 
-        first = false;
+            // Format key and value
+            try buf.writer(allocator).print("{s}: {d}", .{
+                entry.key_ptr.*,
+                entry.value_ptr.*,
+            });
+
+            first = false;
+        }
     }
 
     try buf.appendSlice(allocator, "}");
