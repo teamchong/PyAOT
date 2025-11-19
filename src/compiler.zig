@@ -7,7 +7,7 @@ fn getBuildDir(allocator: std.mem.Allocator) ![]const u8 {
 }
 
 /// Compile Zig source code to native binary
-pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_path: []const u8) !void {
+pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_path: []const u8, c_libraries: []const []const u8) !void {
     const build_dir = try getBuildDir(allocator);
     defer allocator.free(build_dir);
 
@@ -122,15 +122,33 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
     try args.append(allocator, "-ODebug");
     try args.append(allocator, "-lc");
 
-    // Add BLAS linking for NumPy support
+    // Add dynamically detected C libraries
+    for (c_libraries) |lib| {
+        const lib_flag = try std.fmt.allocPrint(allocator, "-l{s}", .{lib});
+        try allocated_flags.append(allocator, lib_flag);
+        try args.append(allocator, lib_flag);
+    }
+
+    // Add BLAS linking for NumPy support (fallback if not in c_libraries)
     const builtin = @import("builtin");
-    if (builtin.os.tag == .macos) {
-        // macOS: Use Accelerate framework (built-in BLAS)
-        try args.append(allocator, "-framework");
-        try args.append(allocator, "Accelerate");
-    } else if (builtin.os.tag == .linux) {
-        // Linux: Link with OpenBLAS or system BLAS
-        try args.append(allocator, "-lopenblas");
+    const has_blas = blk: {
+        for (c_libraries) |lib| {
+            if (std.mem.eql(u8, lib, "openblas") or std.mem.eql(u8, lib, "blas")) {
+                break :blk true;
+            }
+        }
+        break :blk false;
+    };
+
+    if (!has_blas) {
+        if (builtin.os.tag == .macos) {
+            // macOS: Use Accelerate framework (built-in BLAS)
+            try args.append(allocator, "-framework");
+            try args.append(allocator, "Accelerate");
+        } else if (builtin.os.tag == .linux) {
+            // Linux: Link with OpenBLAS or system BLAS
+            try args.append(allocator, "-lopenblas");
+        }
     }
 
     try args.append(allocator, output_flag);
@@ -153,7 +171,7 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
 }
 
 /// Compile Zig source code to shared library (.so/.dylib)
-pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, output_path: []const u8) !void {
+pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, output_path: []const u8, c_libraries: []const []const u8) !void {
     const build_dir = try getBuildDir(allocator);
     defer allocator.free(build_dir);
 
@@ -262,15 +280,33 @@ pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, o
     try args.append(allocator, "-dynamic");
     try args.append(allocator, "-lc");
 
-    // Add BLAS linking for NumPy support
+    // Add dynamically detected C libraries
+    for (c_libraries) |lib| {
+        const lib_flag = try std.fmt.allocPrint(allocator, "-l{s}", .{lib});
+        try allocated_flags.append(allocator, lib_flag);
+        try args.append(allocator, lib_flag);
+    }
+
+    // Add BLAS linking for NumPy support (fallback if not in c_libraries)
     const builtin = @import("builtin");
-    if (builtin.os.tag == .macos) {
-        // macOS: Use Accelerate framework (built-in BLAS)
-        try args.append(allocator, "-framework");
-        try args.append(allocator, "Accelerate");
-    } else if (builtin.os.tag == .linux) {
-        // Linux: Link with OpenBLAS or system BLAS
-        try args.append(allocator, "-lopenblas");
+    const has_blas = blk: {
+        for (c_libraries) |lib| {
+            if (std.mem.eql(u8, lib, "openblas") or std.mem.eql(u8, lib, "blas")) {
+                break :blk true;
+            }
+        }
+        break :blk false;
+    };
+
+    if (!has_blas) {
+        if (builtin.os.tag == .macos) {
+            // macOS: Use Accelerate framework (built-in BLAS)
+            try args.append(allocator, "-framework");
+            try args.append(allocator, "Accelerate");
+        } else if (builtin.os.tag == .linux) {
+            // Linux: Link with OpenBLAS or system BLAS
+            try args.append(allocator, "-lopenblas");
+        }
     }
 
     try args.append(allocator, output_flag);

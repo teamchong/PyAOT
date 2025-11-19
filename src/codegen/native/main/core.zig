@@ -110,6 +110,9 @@ pub const NativeCodegen = struct {
     // Maps variable name -> mutation info
     mutation_info: ?*const @import("../../../analysis/native_types/mutation_analyzer.zig").MutationMap,
 
+    // Track C libraries needed for linking (from C extension imports)
+    c_libraries: std.ArrayList([]const u8),
+
     pub fn init(allocator: std.mem.Allocator, type_inferrer: *TypeInferrer, semantic_info: *SemanticInfo) !*NativeCodegen {
         const self = try allocator.create(NativeCodegen);
 
@@ -155,6 +158,7 @@ pub const NativeCodegen = struct {
             .functions_needing_allocator = std.StringHashMap(void).init(allocator),
             .imported_modules = std.StringHashMap(void).init(allocator),
             .mutation_info = null,
+            .c_libraries = std.ArrayList([]const u8){},
         };
         return self;
     }
@@ -243,6 +247,9 @@ pub const NativeCodegen = struct {
         // Clean up import registry
         self.import_registry.deinit();
         self.allocator.destroy(self.import_registry);
+
+        // Clean up c_libraries list (strings are not owned, just references)
+        self.c_libraries.deinit(self.allocator);
 
         self.allocator.destroy(self);
     }

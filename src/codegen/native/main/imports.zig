@@ -239,9 +239,19 @@ pub fn collectImports(
     while (iter.next()) |python_module| {
         if (self.import_registry.lookup(python_module.*)) |info| {
             switch (info.strategy) {
-                .zig_runtime, .c_library => {
+                .zig_runtime => {
                     // Include modules with Zig implementations
                     try imports.append(self.allocator, python_module.*);
+                },
+                .c_library => {
+                    // Include C library modules
+                    try imports.append(self.allocator, python_module.*);
+
+                    // Add C library to linking list
+                    if (info.c_library) |lib_name| {
+                        try self.c_libraries.append(self.allocator, lib_name);
+                        std.debug.print("[C Extension] Detected {s} → link {s}\n", .{ python_module.*, lib_name });
+                    }
                 },
                 .compile_python => {
                     // Include for compilation (will be handled in generate())
@@ -263,8 +273,14 @@ pub fn collectImports(
                 // Local user module - add to imports list for compilation
                 try imports.append(self.allocator, python_module.*);
             } else {
-                // External package not in registry - skip with warning
-                std.debug.print("Warning: External module '{s}' not found, skipping import\n", .{python_module.*});
+                // Check if it's a C extension installed in site-packages
+                const is_c_ext = import_resolver.isCExtension(python_module.*, self.allocator);
+                if (is_c_ext) {
+                    std.debug.print("[C Extension] Detected {s} in site-packages (no mapping yet)\n", .{python_module.*});
+                } else {
+                    // External package not in registry - skip with warning
+                    std.debug.print("Warning: External module '{s}' not found, skipping import\n", .{python_module.*});
+                }
             }
         }
     }

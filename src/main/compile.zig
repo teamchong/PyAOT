@@ -168,7 +168,12 @@ pub fn compilePythonSource(allocator: std.mem.Allocator, source: []const u8, bin
 
     // Native codegen always produces binaries (not shared libraries)
     std.debug.print("Compiling to native binary...\n", .{});
-    try compiler.compileZig(allocator, zig_code, bin_path);
+
+    // Get C libraries collected during import processing
+    const c_libs = try native_gen.c_libraries.toOwnedSlice(allocator);
+    defer allocator.free(c_libs);
+
+    try compiler.compileZig(allocator, zig_code, bin_path, c_libs);
 }
 
 pub fn compileFile(allocator: std.mem.Allocator, opts: CompileOptions) !void {
@@ -306,7 +311,12 @@ pub fn compileFile(allocator: std.mem.Allocator, opts: CompileOptions) !void {
 
     // Native codegen always produces binaries (not shared libraries)
     std.debug.print("Compiling to native binary...\n", .{});
-    try compiler.compileZig(allocator, zig_code, bin_path);
+
+    // Get C libraries collected during import processing
+    const c_libs = try native_gen.c_libraries.toOwnedSlice(allocator);
+    defer allocator.free(c_libs);
+
+    try compiler.compileZig(allocator, zig_code, bin_path, c_libs);
 
     std.debug.print("✓ Compiled successfully to: {s}\n", .{bin_path});
 
