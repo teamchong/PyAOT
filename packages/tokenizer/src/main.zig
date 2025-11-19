@@ -71,15 +71,29 @@ pub fn main() !void {
     std.debug.print("Benchmark 1: BPE Training\n", .{});
     std.debug.print("-" ** 40 ++ "\n", .{});
 
-    const training_texts = [_][]const u8{
+    // Realistic benchmark: More diverse text corpus
+    const base_texts = [_][]const u8{
         "Hello world! This is a test.",
         "The quick brown fox jumps over the lazy dog.",
         "Machine learning and natural language processing.",
         "Byte pair encoding is a text tokenization method.",
         "This is a longer text to make training more interesting.",
-    } ** 100; // 500 texts
+        "Neural networks learn from large amounts of training data.",
+        "Tokenization breaks text into smaller units called tokens.",
+        "Python is a popular programming language for data science.",
+        "Deep learning models require significant computational resources.",
+        "Natural language understanding is a challenging AI problem.",
+        "Transformers revolutionized the field of NLP in recent years.",
+        "GPT models demonstrate impressive text generation capabilities.",
+        "Byte pair encoding creates subword vocabularies efficiently.",
+        "Machine translation systems bridge communication across languages.",
+        "Sentiment analysis determines emotional tone in text.",
+    };
 
-    var trainer = try Trainer.init(300, allocator);
+    // Scale up: 2000 texts for more realistic benchmark (closer to roadmap's test case)
+    const training_texts = base_texts ** 133; // 1995 texts
+
+    var trainer = try Trainer.init(512, allocator); // Larger vocab (512 tokens) for better comparison
     defer trainer.deinit();
 
     const train_start = std.time.nanoTimestamp();

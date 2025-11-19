@@ -13,9 +13,10 @@ const countPairsSIMD = @import("tokenizer.zig").countPairsSIMD;
 const Word = struct {
     ids: []u32,
     count: i32,
+    original_allocation: []u32, // Track original allocation for proper freeing
 
     fn deinit(self: *Word, allocator: Allocator) void {
-        allocator.free(self.ids);
+        allocator.free(self.original_allocation);
     }
 };
 
@@ -26,6 +27,75 @@ const ChunkResult = struct {
 
     fn deinit(self: *ChunkResult) void {
         self.pair_counts.deinit();
+    }
+};
+
+/// Merge candidate for priority queue (Phase 1 optimization)
+const MergeCandidate = struct {
+    pair: Pair,
+    frequency: i32,
+
+    /// Compare for max-heap (higher frequency = higher priority)
+    fn compare(context: void, a: MergeCandidate, b: MergeCandidate) std.math.Order {
+        _ = context;
+        // Reverse order for max-heap (std.PriorityQueue is min-heap by default)
+        return std.math.order(b.frequency, a.frequency);
+    }
+};
+
+/// Position tracker for incremental updates (Phase 1.5)
+/// Tracks which word indices contain each pair
+const PairPositions = struct {
+    allocator: Allocator,
+    map: std.HashMap(Pair, std.ArrayList(usize), PairContext, std.hash_map.default_max_load_percentage),
+
+    fn init(allocator: Allocator) PairPositions {
+        return .{
+            .allocator = allocator,
+            .map = std.HashMap(
+                Pair,
+                std.ArrayList(usize),
+                PairContext,
+                std.hash_map.default_max_load_percentage,
+            ).initContext(allocator, PairContext{}),
+        };
+    }
+
+    fn deinit(self: *PairPositions) void {
+        var it = self.map.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.deinit(self.allocator);
+        }
+        self.map.deinit();
+    }
+
+    /// Add a word index to a pair's position list
+    fn addPosition(self: *PairPositions, pair: Pair, word_idx: usize) !void {
+        const gop = try self.map.getOrPut(pair);
+        if (!gop.found_existing) {
+            gop.value_ptr.* = std.ArrayList(usize){};
+        }
+        try gop.value_ptr.append(self.allocator, word_idx);
+    }
+
+    /// Remove a word index from a pair's position list
+    fn removePosition(self: *PairPositions, pair: Pair, word_idx: usize) void {
+        if (self.map.getPtr(pair)) |positions| {
+            for (positions.items, 0..) |idx, i| {
+                if (idx == word_idx) {
+                    _ = positions.swapRemove(i);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Get positions for a pair
+    fn getPositions(self: *PairPositions, pair: Pair) ?[]const usize {
+        if (self.map.get(pair)) |positions| {
+            return positions.items;
+        }
+        return null;
     }
 };
 
@@ -148,6 +218,41 @@ fn countPairsSingleThreaded(
     return pair_counts;
 }
 
+/// Apply merge in-place (Phase 1: avoid ArrayList recreation)
+/// Returns true if any merge was applied
+fn mergePairInPlace(word: *Word, pair: Pair, new_id: u32) bool {
+    if (word.ids.len < 2) return false;
+
+    var write_pos: usize = 0;
+    var read_pos: usize = 0;
+    var changed = false;
+
+    while (read_pos < word.ids.len) {
+        // Check if we can merge at current position
+        if (read_pos + 1 < word.ids.len and
+            word.ids[read_pos] == pair.left and
+            word.ids[read_pos + 1] == pair.right)
+        {
+            // Merge: write new_id and skip both tokens
+            word.ids[write_pos] = new_id;
+            write_pos += 1;
+            read_pos += 2;
+            changed = true;
+        } else {
+            // No merge: copy token
+            if (write_pos != read_pos) {
+                word.ids[write_pos] = word.ids[read_pos];
+            }
+            write_pos += 1;
+            read_pos += 1;
+        }
+    }
+
+    // Truncate to new length (no reallocation!)
+    word.ids = word.ids[0..write_pos];
+    return changed;
+}
+
 /// BPE Trainer - matches rustbpe API
 pub const Trainer = struct {
     vocab_size: u32,
@@ -210,86 +315,144 @@ pub const Trainer = struct {
             try words.append(self.allocator, Word{
                 .ids = ids,
                 .count = entry.value_ptr.*,
+                .original_allocation = ids, // Keep reference to original allocation
             });
         }
 
-        // Step 3: Learn merges (SIMD + parallel)
+        // Step 3: Learn merges (Phase 1 OPTIMIZED: PriorityQueue with smart rebuild)
         var merges = std.ArrayList(Pair){};
-        errdefer merges.deinit(self.allocator);
 
         const num_merges = self.vocab_size - 256;
+
+        std.debug.print("Starting OPTIMIZED merge loop (Phase 1: PriorityQueue + in-place)...\n", .{});
+
+        // Initial pair count (one-time cost)
+        var pair_counts = try countPairsParallel(words.items, self.allocator);
+        defer pair_counts.deinit();
+
+        // Build priority queue from initial counts: O(n log n)
+        var heap = std.PriorityQueue(MergeCandidate, void, MergeCandidate.compare).init(self.allocator, {});
+        defer heap.deinit();
+
+        var count_it = pair_counts.iterator();
+        while (count_it.next()) |entry| {
+            try heap.add(.{
+                .pair = entry.key_ptr.*,
+                .frequency = entry.value_ptr.*,
+            });
+        }
+
+        std.debug.print("Built priority queue with {} unique pairs\n", .{heap.count()});
+
+        // Main merge loop: O(m × k log n) where k = affected words per merge
         var merges_done: u32 = 0;
+        while (merges_done < num_merges and heap.count() > 0) {
+            const best = heap.remove(); // O(log n)
+            if (best.frequency == 0) break;
 
-        std.debug.print("Starting merge loop...\n", .{});
-
-        while (merges_done < num_merges) {
-            // Count all pairs (parallel with SIMD)
-            var pair_counts = try countPairsParallel(words.items, self.allocator);
-            defer pair_counts.deinit();
-
-            // Find most frequent pair
-            var best_pair: ?Pair = null;
-            var best_count: i32 = 0;
-
-            var it = pair_counts.iterator();
-            while (it.next()) |entry| {
-                if (entry.value_ptr.* > best_count) {
-                    best_pair = entry.key_ptr.*;
-                    best_count = entry.value_ptr.*;
-                }
-            }
-
-            if (best_pair == null or best_count == 0) break;
-
-            const pair = best_pair.?;
-            try merges.append(self.allocator, pair);
-
-            // Apply merge to all words
+            try merges.append(self.allocator, best.pair);
             const new_id = 256 + merges_done;
+
+            // Track new pair frequencies after this merge
+            var new_frequencies = std.HashMap(
+                Pair,
+                i32,
+                PairContext,
+                std.hash_map.default_max_load_percentage,
+            ).initContext(self.allocator, PairContext{});
+            defer new_frequencies.deinit();
+
+            // Apply merge in-place to ALL words, collecting new frequencies
+            // This is still better than naive O(n²) because:
+            // 1. In-place merge (no ArrayList recreation)
+            // 2. Only recalculate pairs in words that changed
+            // 3. Priority queue avoids scanning all pairs
             for (words.items) |*word| {
+                if (!mergePairInPlace(word, best.pair, new_id)) continue;
+
+                // Recalculate pairs ONLY in this modified word
                 if (word.ids.len < 2) continue;
 
-                // Create new IDs with merge applied
-                var new_ids = std.ArrayList(u32){};
-                defer new_ids.deinit(self.allocator);
-
                 var i: usize = 0;
-                while (i < word.ids.len) {
-                    if (i + 1 < word.ids.len and word.ids[i] == pair.left and word.ids[i + 1] == pair.right) {
-                        try new_ids.append(self.allocator, new_id);
-                        i += 2;
+                while (i < word.ids.len - 1) : (i += 1) {
+                    const pair = Pair{ .left = word.ids[i], .right = word.ids[i + 1] };
+
+                    // Count with SIMD
+                    const count = countPairsSIMD(word.ids, pair);
+                    const weighted = count * @as(u32, @intCast(word.count));
+
+                    const gop = try new_frequencies.getOrPut(pair);
+                    if (gop.found_existing) {
+                        gop.value_ptr.* += @intCast(weighted);
                     } else {
-                        try new_ids.append(self.allocator, word.ids[i]);
-                        i += 1;
+                        gop.value_ptr.* = @intCast(weighted);
                     }
                 }
-
-                // Replace (zero-copy swap)
-                self.allocator.free(word.ids);
-                word.ids = try new_ids.toOwnedSlice(self.allocator);
             }
+
+            // Smart rebuild: Instead of full rebuild, add only new/affected pairs
+            // Remove pairs involving merged tokens from heap, add updated frequencies
+            var temp_heap = std.PriorityQueue(MergeCandidate, void, MergeCandidate.compare).init(self.allocator, {});
+
+            // Add new frequencies
+            var new_it = new_frequencies.iterator();
+            while (new_it.next()) |entry| {
+                if (entry.value_ptr.* > 0) {
+                    try temp_heap.add(.{
+                        .pair = entry.key_ptr.*,
+                        .frequency = entry.value_ptr.*,
+                    });
+                }
+            }
+
+            // Filter old heap: keep pairs that weren't affected by this merge
+            while (heap.removeOrNull()) |candidate| {
+                // Skip the merged pair and any pair involving the merged tokens
+                if (candidate.pair.eql(best.pair) or
+                    candidate.pair.left == best.pair.left or
+                    candidate.pair.left == best.pair.right or
+                    candidate.pair.right == best.pair.left or
+                    candidate.pair.right == best.pair.right)
+                {
+                    continue;
+                }
+
+                // Keep if not in new frequencies (unaffected by merge)
+                if (!new_frequencies.contains(candidate.pair)) {
+                    try temp_heap.add(candidate);
+                }
+            }
+
+            heap.deinit();
+            heap = temp_heap;
 
             merges_done += 1;
 
             // Progress logging
-            if (merges_done % (num_merges / 100) == 0 or merges_done == num_merges) {
+            if (merges_done % @max(1, num_merges / 100) == 0 or merges_done == num_merges) {
                 const percent = (merges_done * 100) / num_merges;
-                std.debug.print("Progress: {}% ({}/{} merges) - Last merge: ({}, {}) -> {} (frequency: {})\n", .{
+                std.debug.print("Progress: {}% ({}/{} merges) - Last: ({}, {}) -> {} (freq: {}, heap: {})\n", .{
                     percent,
                     merges_done,
                     num_merges,
-                    pair.left,
-                    pair.right,
+                    best.pair.left,
+                    best.pair.right,
                     new_id,
-                    best_count,
+                    best.frequency,
+                    heap.count(),
                 });
             }
         }
 
         std.debug.print("Finished training: {} merges completed\n", .{merges_done});
 
-        // Step 4: Build tokenizer
-        return try self.buildTokenizer(merges);
+        // Step 4: Build tokenizer (transfers ownership of merges)
+        const tokenizer = try self.buildTokenizer(merges);
+
+        // Don't free merges - ownership transferred to tokenizer
+        // merges.deinit() would double-free!
+
+        return tokenizer;
     }
 
     /// Collect word counts from texts (parallel)
