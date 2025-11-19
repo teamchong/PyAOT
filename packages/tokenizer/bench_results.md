@@ -1,4 +1,4 @@
-| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
+| Command | Mean [s] | Min [s] | Max [s] | Relative |
 |:---|---:|---:|---:|---:|
-| `./zig-out/bin/tokenizer_bench` | 607.1 ± 17.8 | 587.3 | 645.6 | 19.19 ± 0.61 |
-| `./benchmark_rust/./target/release/bench` | 31.6 ± 0.4 | 30.8 | 32.1 | 1.00 |
+| `./zig-out/bin/tokenizer_bench` | 4.629 ± 0.121 | 4.469 | 4.889 | 9.01 ± 0.27 |
+| `./benchmark_rust/./target/release/bench` | 0.514 ± 0.008 | 0.501 | 0.523 | 1.00 |

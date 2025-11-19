@@ -91,8 +91,8 @@ fn main() {
         "Sentiment analysis determines emotional tone in text.",
     ];
 
-    // Quick benchmark for hyperfine: 500 texts
-    let training_texts: Vec<&str> = base_texts.into_iter().cycle().take(500).collect();
+    // Large benchmark for hyperfine: 15,000 texts
+    let training_texts: Vec<&str> = base_texts.into_iter().cycle().take(15000).collect();
 
     // Collect words
     let mut word_counts: HashMap<String, i32> = HashMap::new();
@@ -111,7 +111,7 @@ fn main() {
 
     let counts: Vec<i32> = word_counts.values().copied().collect();
 
-    let vocab_size = 300; // Quick benchmark
+    let vocab_size = 2048; // Large workload
     let num_merges = vocab_size - 256;
     let mut merges = Vec::new();
 
@@ -155,7 +155,7 @@ fn main() {
         "Modern language models use BPE tokenization for efficiency."
     );
 
-    let iterations = 1000; // Fixed for hyperfine
+    let iterations = 3_000; // ~3-5s workload (~3min total with hyperfine)
 
     let encode_start = Instant::now();
 

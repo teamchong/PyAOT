@@ -9,15 +9,15 @@
 
 ## Hyperfine Results (10 runs, same workload)
 
-| Implementation | Mean | Std Dev | Relative |
-|----------------|------|---------|----------|
-| **Rust baseline** | **31.6ms** | ±0.4ms | **1.00x** ✅ |
-| **Zig PyAOT** | **607.1ms** | ±17.8ms | **19.2x slower** ❌ |
+| Implementation | Mean | Std Dev | Range | Relative |
+|----------------|------|---------|-------|----------|
+| **Rust baseline** | **513.8ms** | ±8.0ms | 501-523ms | **1.00x** ✅ |
+| **Zig PyAOT** | **4.629s** | ±121ms | 4.47-4.89s | **9.0x slower** ❌ |
 
-**Workload:** 500 texts training (vocab 300) + 1000 encoding iterations
+**Workload:** 15K texts training (vocab 2048) + 3K encoding iterations
 
-**Why slow:**
-- Training: PriorityQueue added, but Rust uses parallel training (rayon)
-- Encoding: Scanning all tokens repeatedly instead of applying merges in order
+**Why 9x slower:**
+1. **Training:** Rust uses rayon (parallel), Zig single-threaded
+2. **Encoding:** Wrong algorithm - rescanning tokens instead of applying merges in order
 
-**Next:** Fix encoding algorithm (apply merges sequentially, not scan repeatedly)
+**Next:** Fix encoding algorithm to match Rust (apply all merges in order once)

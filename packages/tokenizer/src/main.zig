@@ -90,12 +90,12 @@ pub fn main() !void {
         "Sentiment analysis determines emotional tone in text.",
     };
 
-    // Quick benchmark for hyperfine: 500 texts, vocab 300 (~10s total)
-    const training_texts = base_texts ** 33; // 495 texts
-    var trainer = try Trainer.init(300, allocator);
+    // Large benchmark for hyperfine: 15,000 texts, vocab 2048 (~10s+ total)
+    const training_texts = base_texts ** 1000; // 15,000 texts
+    var trainer = try Trainer.init(2048, allocator);
     defer trainer.deinit();
 
-    std.debug.print("Training with {} texts, vocab 300...\n", .{training_texts.len});
+    std.debug.print("Training with {} texts, vocab 2048...\n", .{training_texts.len});
 
     const train_start = std.time.nanoTimestamp();
     var tokenizer = try trainer.trainFromIterator(&training_texts);
@@ -118,7 +118,7 @@ pub fn main() !void {
         \\Modern language models use BPE tokenization for efficiency.
     ;
 
-    const iterations: usize = 1000; // Fixed for hyperfine
+    const iterations: usize = 3_000; // ~3-5s workload (~3min total with hyperfine)
 
     const encode_start = std.time.nanoTimestamp();
     var i: usize = 0;
