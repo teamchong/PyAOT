@@ -92,7 +92,7 @@ fn main() {
     ];
 
     // Large benchmark for hyperfine: 15,000 texts
-    let training_texts: Vec<&str> = base_texts.into_iter().cycle().take(15000).collect();
+    let training_texts: Vec<&str> = base_texts.into_iter().cycle().take(150000).collect(); // 10x training data
 
     // Collect words
     let mut word_counts: HashMap<String, i32> = HashMap::new();
@@ -155,7 +155,7 @@ fn main() {
         "Modern language models use BPE tokenization for efficiency."
     );
 
-    let iterations = 30_000; // ~30-50s workload for better measurements
+    let iterations = 60_000; // Double workload to avoid cold start differences
 
     let encode_start = Instant::now();
 

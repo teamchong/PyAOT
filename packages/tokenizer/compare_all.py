@@ -11,6 +11,11 @@ import re
 def run_zig_benchmark():
     """Run Zig benchmark and parse output"""
     print("\n🔥 Running PyAOT Zig benchmark...")
+
+    import os
+    cwd = os.getcwd()
+    print(f"  CWD: {cwd}")
+
     result = subprocess.run(
         ["./zig-out/bin/tokenizer_bench"],
         capture_output=True,
@@ -18,21 +23,22 @@ def run_zig_benchmark():
         timeout=120
     )
 
-    output = result.stdout
+    # Combine stdout and stderr (Zig might print to stderr)
+    output = result.stdout + result.stderr
 
-    # Parse training time
+    if not result.stdout and not result.stderr:
+        print(f"  ❌ No output at all! Exit code: {result.returncode}")
+
+    # Parse training time - match "Training time: 329ms (0.3s)"
     train_match = re.search(r"Training time: (\d+)ms", output)
     train_ms = int(train_match.group(1)) if train_match else None
 
-    # Parse encoding time
+    # Parse encoding time - match "30000 iterations: 854ms total"
     encode_match = re.search(r"(\d+) iterations: (\d+)ms total", output)
     encode_ms = int(encode_match.group(2)) if encode_match else None
 
-    if not train_ms or not encode_ms:
-        print(f"  ⚠️  Failed to parse. Output:\n{output[:500]}")
-
-    print(f"  Training: {train_ms}ms")
-    print(f"  Encoding (3000 iters): {encode_ms}ms")
+    print(f"  Training: {train_ms}ms" if train_ms else "  Training: Failed to parse")
+    print(f"  Encoding (30K iters): {encode_ms}ms" if encode_ms else "  Encoding: Failed to parse")
     print(f"  Total: {train_ms + encode_ms if train_ms and encode_ms else 'N/A'}ms")
 
     return {
@@ -61,10 +67,11 @@ def run_rust_benchmark():
 
     # Parse encoding time
     encode_match = re.search(r"Total time \((\d+) iterations\): (\d+)ms", output)
+    iterations = int(encode_match.group(1)) if encode_match else None
     encode_ms = int(encode_match.group(2)) if encode_match else None
 
     print(f"  Training: {train_ms}ms")
-    print(f"  Encoding (3000 iters): {encode_ms}ms")
+    print(f"  Encoding ({iterations} iters): {encode_ms}ms" if iterations else f"  Encoding: {encode_ms}ms")
     print(f"  Total: {train_ms + encode_ms if train_ms and encode_ms else 'N/A'}ms")
 
     return {
@@ -108,7 +115,7 @@ def benchmark_huggingface():
         "Sentiment analysis determines emotional tone in text.",
     ]
 
-    TRAINING_TEXTS = BASE_TEXTS * 1000  # 15,000 texts
+    TRAINING_TEXTS = BASE_TEXTS * 10000  # 10x training data (150K texts)  # 15,000 texts
     TEST_TEXT = (
         "The quick brown fox jumps over the lazy dog. "
         "This sentence contains every letter of the alphabet at least once. "
@@ -128,7 +135,7 @@ def benchmark_huggingface():
 
     # Encoding (30000 iterations - same as Zig/Rust)
     encode_start = time.perf_counter()
-    for _ in range(30000):
+    for _ in range(60000):  # 2x encoding iterations
         output = tokenizer.encode(TEST_TEXT)
     encode_ms = (time.perf_counter() - encode_start) * 1000
 
@@ -167,7 +174,7 @@ def benchmark_tiktoken():
 
     # Encoding only (30000 iterations - same as others)
     encode_start = time.perf_counter()
-    for _ in range(30000):
+    for _ in range(60000):  # 2x encoding iterations
         tokens = enc.encode(TEST_TEXT)
     encode_ms = (time.perf_counter() - encode_start) * 1000
 
@@ -183,39 +190,74 @@ def benchmark_tiktoken():
     }
 
 
+def format_time(ms):
+    """Format time as s or ms depending on magnitude"""
+    if ms >= 1000:
+        return f"{ms/1000:.2f}s"
+    return f"{ms:.0f}ms"
+
 def print_comparison(results):
-    """Print final comparison table"""
+    """Print separated training + encoding results"""
     print("\n" + "=" * 80)
-    print("📊 FINAL RESULTS - Same Data (15K texts, vocab 2048, 3K encoding)")
+    print("📊 BENCHMARK 1: TRAINING ONLY (15K texts, vocab 2048)")
     print("=" * 80)
     print()
-    print(f"{'Implementation':<20} {'Training':<15} {'Encoding':<15} {'Total':<15} {'vs Winner':<15}")
+    print(f"{'Implementation':<20} {'Training':<15} {'vs Fastest':<15}")
     print("-" * 80)
 
-    valid = [r for r in results if r and r['total_ms']]
-    sorted_results = sorted(valid, key=lambda x: x['total_ms'])
+    train_results = [(r['name'], r['train_ms']) for r in results if r and r['train_ms']]
+    train_results.sort(key=lambda x: x[1])
+    fastest_train = train_results[0][1] if train_results else 0
 
-    winner_total = sorted_results[0]['total_ms'] if sorted_results else None
+    for name, train_ms in train_results:
+        ratio = train_ms / fastest_train if fastest_train else 0
+        marker = "🏆" if ratio <= 1.01 else ""
+        time_str = format_time(train_ms)
+        print(f"{name:<20} {time_str:>12}     {ratio:>6.2f}x {marker}")
 
-    for r in results:
-        if r:
-            train = f"{r['train_ms']:.0f}ms" if r['train_ms'] else "N/A"
-            encode = f"{r['encode_ms']:.0f}ms" if r['encode_ms'] else "N/A"
-            total = f"{r['total_ms']:.0f}ms" if r['total_ms'] else "N/A"
+    if train_results:
+        print(f"\n🏆 FASTEST TRAINING: {train_results[0][0]} ({format_time(train_results[0][1])})")
 
-            if r['total_ms'] and winner_total:
-                ratio = r['total_ms'] / winner_total
-                vs_winner = f"{ratio:.2f}x"
-            else:
-                vs_winner = "N/A"
-
-            print(f"{r['name']:<20} {train:<15} {encode:<15} {total:<15} {vs_winner:<15}")
-
+    print("\n" + "=" * 80)
+    print("📊 BENCHMARK 2: ENCODING ONLY (30K iterations)")
+    print("=" * 80)
+    print()
+    print(f"{'Implementation':<20} {'Encoding':<15} {'vs Fastest':<15}")
     print("-" * 80)
 
-    if sorted_results:
-        winner = sorted_results[0]
-        print(f"\n🏆 WINNER: {winner['name']} ({winner['total_ms']:.0f}ms total)")
+    encode_results = [(r['name'], r['encode_ms']) for r in results if r and r['encode_ms']]
+    encode_results.sort(key=lambda x: x[1])
+    fastest_encode = encode_results[0][1] if encode_results else 0
+
+    for name, encode_ms in encode_results:
+        ratio = encode_ms / fastest_encode if fastest_encode else 0
+        marker = "🏆" if ratio <= 1.01 else ""
+        time_str = format_time(encode_ms)
+        print(f"{name:<20} {time_str:>12}     {ratio:>6.2f}x {marker}")
+
+    if encode_results:
+        print(f"\n🏆 FASTEST ENCODING: {encode_results[0][0]} ({format_time(encode_results[0][1])})")
+
+    # PyAOT Zig status
+    print("\n" + "=" * 80)
+    print("🎯 PyAOT Zig STATUS")
+    print("=" * 80)
+    zig_result = next((r for r in results if r and r['name'] == 'PyAOT Zig'), None)
+    if zig_result and zig_result['train_ms'] and zig_result['encode_ms']:
+        train_rank = next((i for i, (n, _) in enumerate(train_results, 1) if n == 'PyAOT Zig'), 0)
+        encode_rank = next((i for i, (n, _) in enumerate(encode_results, 1) if n == 'PyAOT Zig'), 0)
+
+        print(f"\nTraining: #{train_rank} of {len(train_results)} - {zig_result['train_ms']:.0f}ms ({zig_result['train_ms']/fastest_train:.2f}x vs fastest)")
+        print(f"Encoding: #{encode_rank} of {len(encode_results)} - {zig_result['encode_ms']:.0f}ms ({zig_result['encode_ms']/fastest_encode:.2f}x vs fastest)")
+
+        if train_rank == 1 and encode_rank == 1:
+            print("\n🏆 PyAOT Zig is THE FASTEST at BOTH!")
+        else:
+            print(f"\n❌ Need to beat:")
+            if train_rank != 1:
+                print(f"   Training: {train_results[0][0]} ({train_results[0][1]:.0f}ms, gap: {zig_result['train_ms'] - train_results[0][1]:.0f}ms)")
+            if encode_rank != 1:
+                print(f"   Encoding: {encode_results[0][0]} ({encode_results[0][1]:.0f}ms, gap: {zig_result['encode_ms'] - encode_results[0][1]:.0f}ms)")
 
     print()
 
