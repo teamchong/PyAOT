@@ -177,8 +177,13 @@ Benchmarked on Apple M2 (60K iterations, 286-byte text, cl100k_base tokenizer):
 - PyAOT is **1.79x faster than tiktoken (Rust)**, **7.1x faster than HuggingFace**
 - TokenDagger's C implementation with PCRE2 regex is currently the fastest
 
-**BPE Training:**
-- PyAOT: **19ms** (150K texts, vocab 2048, 328 merges learned)
+**BPE Training (150K texts, vocab 2048):**
+
+| Library | Time | vs Fastest |
+|---------|------|------------|
+| **PyAOT (Zig)** | **26ms** | **1.00x** 🏆 |
+| HuggingFace (Rust) | 193ms | 7.42x |
+| SentencePiece (C++) | 299ms | 11.50x |
 
 **Browser (10K iterations, Playwright/Chrome headless):**
 
