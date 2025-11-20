@@ -31,10 +31,10 @@ benchmark: benchmark-train benchmark-encoding
 # Training benchmarks (PyAOT vs HuggingFace vs SentencePiece)
 benchmark-train:
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
-	@echo "$(GREEN)📊 BPE Training Benchmark (150K texts, vocab 2048)$(RESET)"
+	@echo "$(GREEN)📊 BPE Training Benchmark (hyperfine)$(RESET)"
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo ""
-	@python3 bench_training.py
+	@./bench_training.sh
 	@echo ""
 
 # Quick benchmark (PyAOT vs TokenDagger only - for fast iteration)
