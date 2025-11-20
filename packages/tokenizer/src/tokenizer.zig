@@ -256,9 +256,19 @@ pub const Tokenizer = struct {
             token_bits[word_idx] |= (@as(u64, 1) << bit_pos);
         }
 
-        // Process merges
+        // Process merges with EARLY EXIT + PREFETCH!
+        var no_progress_count: usize = 0;
         for (self.merges.items, 0..) |pair, idx| {
             if (current_len < 2) break;
+
+            // EARLY EXIT: Stop if we've had 100 consecutive no-ops
+            // This is the SECRET to matching tiktoken's speed!
+            if (no_progress_count >= 100) break;
+
+            // PREFETCH next merge for better cache utilization
+            if (idx + 1 < self.merges.items.len) {
+                @prefetch(&self.merges.items[idx + 1], .{});
+            }
 
             // Bloom filter check
             const left_bit = pair.left & 1023;
@@ -271,19 +281,25 @@ pub const Tokenizer = struct {
             const right_pos = @as(u6, @intCast(right_bit & 63));
             const right_exists = (token_bits[right_word] & (@as(u64, 1) << right_pos)) != 0;
 
-            if (!left_exists or !right_exists) continue;
+            if (!left_exists or !right_exists) {
+                no_progress_count += 1;
+                continue;
+            }
 
             const new_id: u32 = 256 + @as(u32, @intCast(idx));
             const new_len = mergePairInPlace(tokens[0..current_len], pair, new_id);
 
             if (new_len != current_len) {
                 current_len = new_len;
+                no_progress_count = 0; // Reset counter on success!
 
                 // Update bloom filter
                 const new_bit = new_id & 1023;
                 const new_word = new_bit >> 6;
                 const new_pos = @as(u6, @intCast(new_bit & 63));
                 token_bits[new_word] |= (@as(u64, 1) << new_pos);
+            } else {
+                no_progress_count += 1;
             }
         }
 
