@@ -239,7 +239,10 @@ pub const Tokenizer = struct {
     }
 
     /// Stack-optimized version that modifies buffer in-place!
+    /// UNSAFE: No bounds checking for MAXIMUM SPEED!
     fn applyMergesStack(self: *Tokenizer, tokens: []u32) !usize {
+        @setRuntimeSafety(false); // UNSAFE MODE!
+
         if (tokens.len < 2) return tokens.len;
 
         var current_len = tokens.len;
@@ -340,6 +343,8 @@ pub const Tokenizer = struct {
     /// Phase 3: Ultra-fast SIMD merge (wider vectors + @reduce + unsafe)
     /// Returns new length after merging
     fn mergePairInPlace(tokens: []u32, pair: Pair, new_id: u32) usize {
+        @setRuntimeSafety(false); // MAXIMUM SPEED - NO CHECKS!
+
         if (tokens.len < 2) return tokens.len;
 
         // OPTIMAL SIMD: Balance between throughput and branch prediction
@@ -350,8 +355,8 @@ pub const Tokenizer = struct {
                 // 16-wide is sweet spot (AVX-512 single register)
                 break :blk 16;
             } else if (builtin.cpu.arch == .aarch64) {
-                // ARM NEON: 8-wide (2x 128-bit)
-                break :blk 8;
+                // ARM: Try 16-wide! Apple Silicon has 32 NEON registers!
+                break :blk 16;
             } else {
                 break :blk 4; // Fallback
             }
