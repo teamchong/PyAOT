@@ -44,7 +44,7 @@ pub fn build(b: *std.Build) void {
                 .cpu_arch = .wasm32,
                 .os_tag = .freestanding,
             }),
-            .optimize = .ReleaseSmall,
+            .optimize = .ReleaseFast,
         }),
     });
     wasm.entry = .disabled;

@@ -176,12 +176,12 @@ Benchmarked with hyperfine (5 runs, 60K iterations, 286-byte text, Apple M2):
 
 | Implementation | Time | vs Fastest | Size (code only) | Type |
 |---------------|------|------------|------------------|------|
-| **PyAOT (Zig→WASM)** | **10ms** | **1.00x** 🏆 | **60KB** | WASM |
-| ai-tokenizer | 42ms | 4.20x | 8.0MB | Pure JS |
-| gpt-tokenizer | 64ms | 6.40x | 1.1MB | Pure JS |
-| tiktoken (Rust→WASM) | 832ms | 83.20x | 5.3MB | WASM |
+| **PyAOT (Zig→WASM)** | **9ms** | **1.00x** 🏆 | **848KB** | WASM |
+| ai-tokenizer | 42ms | 4.67x | 8.0MB | Pure JS |
+| gpt-tokenizer | 60ms | 6.67x | 1.1MB | Pure JS |
+| tiktoken (Rust→WASM) | 809ms | 89.89x | 5.3MB | WASM |
 
-PyAOT's tokenizer beats C by 4.4% natively, Rust by 61%. **In browser: PyAOT WASM beats Pure JS by 4.2x and Rust WASM by 83x!**
+PyAOT's tokenizer beats C by 4.4% natively, Rust by 61%. **In browser: PyAOT WASM beats Pure JS by 4.7x and Rust WASM by 90x!**
 
 **Why PyAOT is faster:**
 - Direct compilation to native machine code via Zig (no interpreter)
