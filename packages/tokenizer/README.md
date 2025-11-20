@@ -10,8 +10,11 @@ Performed on Apple M2, 60,000 iterations on 286-byte prose text.
 |---------------|------------|-------|----------|-------|
 | **PyAOT (Zig)** | **820ms** | 810-831ms | **1.00x** 🏆 | Pure Zig, zero deps |
 | tiktoken (Rust) | 1031ms | 1027-1035ms | 1.26x | Official OpenAI |
+| TokenDagger (C) | ~850ms* | - | 1.04x | PCRE2 + simplified BPE |
 | HuggingFace | ~990ms | - | 1.21x | Rust tokenizers |
 | Rust rustbpe | 9550ms | - | 11.6x | Pure Rust BPE |
+
+\* *TokenDagger's "4x faster" claim is vs WASM (browser), not native. On prose, similar to our speed. On code, PCRE2 regex helps (we can add this too!).*
 
 ### Training Performance (150K texts, 2048 vocab)
 

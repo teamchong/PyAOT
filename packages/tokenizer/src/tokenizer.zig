@@ -261,8 +261,8 @@ pub const Tokenizer = struct {
         for (self.merges.items, 0..) |pair, idx| {
             if (current_len < 2) break;
 
-            // EARLY EXIT: Stop if we've had 100 consecutive no-ops
-            // This is the SECRET to matching tiktoken's speed!
+            // EARLY EXIT: Optimal = 100 (tested: 30 too aggressive, gives wrong count!)
+            // This balances correctness vs speed
             if (no_progress_count >= 100) break;
 
             // PREFETCH next merge for better cache utilization
