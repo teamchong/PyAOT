@@ -1,4 +1,4 @@
-.PHONY: help benchmark benchmark-train benchmark-encoding benchmark-web benchmark-quick build clean
+.PHONY: help benchmark benchmark-train benchmark-encoding benchmark-web benchmark-quick test-correctness build clean
 
 # Colors for output
 GREEN := \033[0;32m
@@ -13,11 +13,11 @@ help:
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo ""
 	@echo "$(GREEN)Available targets:$(RESET)"
-	@echo "  make benchmark          - Run all benchmarks (train + encoding + web)"
-	@echo "  make benchmark-quick    - PyAOT vs TokenDagger only (fast iteration)"
-	@echo "  make benchmark-train    - BPE training (3 libraries, 150K texts)"
-	@echo "  make benchmark-encoding - Native encoding (2 libraries, 60K iterations)"
-	@echo "  make benchmark-web      - Browser (5 libraries, 10K iterations)"
+	@echo "  make benchmark          - Run all benchmarks (train + encoding)"
+	@echo "  make benchmark-quick    - PyAOT vs TokenDagger (hyperfine, ~10s)"
+	@echo "  make benchmark-train    - BPE training (3 libraries, ~30s)"
+	@echo "  make benchmark-encoding - PyAOT vs tiktoken (hyperfine, ~20s)"
+	@echo "  make test-correctness   - Verify PyAOT matches tiktoken output"
 	@echo ""
 	@echo "$(GREEN)Build targets:$(RESET)"
 	@echo "  make build              - Build native tokenizer"
@@ -25,8 +25,8 @@ help:
 	@echo "  make clean              - Clean build artifacts"
 	@echo ""
 
-# Run all benchmarks
-benchmark: benchmark-train benchmark-encoding benchmark-web
+# Run all benchmarks (skip web - too slow)
+benchmark: benchmark-train benchmark-encoding
 
 # Training benchmarks (PyAOT vs HuggingFace vs SentencePiece)
 benchmark-train:
@@ -49,10 +49,19 @@ benchmark-quick: build
 # Native encoding benchmarks (PyAOT vs tiktoken - 60K iterations)
 benchmark-encoding: build
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
-	@echo "$(GREEN)⚡ Native Encoding Benchmark (60K iterations)$(RESET)"
+	@echo "$(GREEN)⚡ Encoding Benchmark: PyAOT vs tiktoken (hyperfine)$(RESET)"
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo ""
-	@python3 final_benchmark.py
+	@./bench_encoding.sh
+	@echo ""
+
+# Test correctness (verify PyAOT matches tiktoken)
+test-correctness: build
+	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo "$(GREEN)🔍 Correctness Test$(RESET)"
+	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
+	@echo ""
+	@python3 test_correctness.py
 	@echo ""
 
 # Browser benchmarks (5 libraries - 10K iterations each)
