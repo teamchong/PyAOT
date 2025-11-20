@@ -177,15 +177,15 @@ Benchmarked with hyperfine (5 runs, 60K iterations, 286-byte text, Apple M2):
 | Implementation | Time | vs Fastest | Size (code only) | Type |
 |---------------|------|------------|------------------|------|
 | **PyAOT (Zig→WASM)** | **10ms** | **1.00x** 🏆 | **60KB** | WASM |
-| ai-tokenizer | 42ms | 4.20x | 8.0MB | Pure JS |
+| ai-tokenizer | 41ms | 4.10x | 8.6MB | Pure JS |
 | gpt-tokenizer | 60ms | 6.00x | 1.1MB | Pure JS |
-| tiktoken (Rust→WASM) | 809ms | 80.90x | 5.3MB | WASM |
+| tiktoken (Rust→WASM) | 825ms | 82.50x | 5.6MB | WASM |
 
-PyAOT's tokenizer is **2x faster than C**, 3x faster than Rust (tiktoken). **In browser: PyAOT WASM beats Pure JS by 4.2x and Rust WASM by 81x!**
+PyAOT's tokenizer is **2x faster than C**, 3x faster than Rust (tiktoken). **In browser: PyAOT WASM beats Pure JS by 4.1x and Rust WASM by 82.5x!**
 
 *Note: Multi-threaded batch mode (8 cores) achieves ~540ms for high-throughput scenarios, but single-threaded latency is more relevant for typical library usage.*
 
-**BPE Training:** PyAOT trains BPE tokenizer in ~20ms (150K texts, vocab 2048, 1792 merges).
+**BPE Training:** PyAOT trains BPE tokenizer in **20ms** (150K texts, vocab 2048, 328 merges learned).
 
 **Why PyAOT is faster:**
 - Direct compilation to native machine code via Zig (no interpreter)
