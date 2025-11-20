@@ -2,15 +2,7 @@ import { Tokenizer } from 'ai-tokenizer';
 import * as o200k from 'ai-tokenizer/encoding/o200k_base';
 
 try {
-    const tokenizer = new Tokenizer({
-        name: o200k.name,
-        patternRegex: new RegExp(o200k.pat_str, 'gu'),
-        specialTokensRegex: null,
-        specialTokens: o200k.special_tokens,
-        stringRankEncoder: o200k.stringEncoder,
-        binaryRankEncoder: o200k.binaryEncoder,
-        decoder: o200k.decoder
-    });
+    const tokenizer = new Tokenizer(o200k);
 
     window.benchAITokenizer = function(text, iterations) {
         // Warmup

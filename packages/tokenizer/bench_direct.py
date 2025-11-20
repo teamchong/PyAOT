@@ -19,9 +19,15 @@ async def main():
     with open('dist/bench_ai.js', 'r') as f:
         ai_bundle = f.read()
 
+    # Read WASM as base64
+    import base64
+    with open('dist/tiktoken_bg-qr7t0yz5.wasm', 'rb') as f:
+        wasm_bytes = f.read()
+        wasm_base64 = base64.b64encode(wasm_bytes).decode('utf-8')
+
     print(f"Bundle sizes:")
     print(f"  gpt-tokenizer: {len(gpt_bundle)/1024/1024:.1f}MB")
-    print(f"  tiktoken: {len(tiktoken_bundle)/1024:.0f}KB")
+    print(f"  tiktoken: {len(tiktoken_bundle)/1024:.0f}KB + {len(wasm_bytes)/1024/1024:.1f}MB WASM")
     print(f"  ai-tokenizer: {len(ai_bundle)/1024/1024:.1f}MB")
     print()
 
@@ -40,7 +46,25 @@ async def main():
         print("Injecting bundles...")
         await page.add_script_tag(content=gpt_bundle)
         await page.add_script_tag(content=ai_bundle)
+
+        # Inject tiktoken bundle first
         await page.add_script_tag(content=tiktoken_bundle)
+
+        # Decode and instantiate WASM
+        await page.evaluate(f"""
+            (async () => {{
+                const base64 = '{wasm_base64}';
+                const binary = atob(base64);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) {{
+                    bytes[i] = binary.charCodeAt(i);
+                }}
+                const wasmModule = await WebAssembly.instantiate(bytes, {{}});
+                if (window.__wbg_set_wasm) {{
+                    window.__wbg_set_wasm(wasmModule.instance.exports);
+                }}
+            }})();
+        """)
 
         # Run benchmarks
         print("\nRunning benchmarks (10K iterations)...")
