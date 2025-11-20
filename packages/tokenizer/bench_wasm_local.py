@@ -30,7 +30,7 @@ async def main():
             page = await browser.new_page()
 
             # Navigate to benchmark page
-            await page.goto('http://localhost:8899/bench_local.html')
+            await page.goto('http://localhost:8899/bench_final.html')
 
             print("Running benchmarks (10K iterations)...")
             print()
