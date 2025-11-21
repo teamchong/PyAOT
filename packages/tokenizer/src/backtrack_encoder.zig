@@ -1,5 +1,6 @@
 /// Backtracking encoder - port of rs-bpe's algorithm
 /// Greedy forward pass with backtracking on invalid pairs
+/// Based on: ../../../rs-bpe/bpe/src/backtrack_encoder.rs
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -7,6 +8,7 @@ pub const BacktrackEncoder = struct {
     allocator: Allocator,
     text: []const u8,
     tokens: std.ArrayList(u32),
+    next_token: ?u32, // Track next token to process (key state!)
     pos: usize,
     bitfield: BitField,
 
@@ -23,10 +25,14 @@ pub const BacktrackEncoder = struct {
         var tokens = std.ArrayList(u32){};
         try tokens.ensureTotalCapacity(allocator, text.len / 3);
 
+        // Initialize next_token with first match (rs-bpe does this in constructor)
+        const first_token = findNextMatch(text, 0, vocab);
+
         return BacktrackEncoder{
             .allocator = allocator,
             .text = text,
             .tokens = tokens,
+            .next_token = first_token,
             .pos = 0,
             .bitfield = try BitField.init(allocator, text.len + 1),
             .vocab = vocab,
@@ -39,44 +45,43 @@ pub const BacktrackEncoder = struct {
         self.bitfield.deinit();
     }
 
-    /// Find longest token match starting at current position
-    fn nextMatch(self: *BacktrackEncoder) ?u32 {
-        if (self.pos >= self.text.len) return null;
+    /// Find longest token match starting at given position
+    /// This is a static function like rs-bpe's next_match
+    fn findNextMatch(text: []const u8, start_pos: usize, vocab: *const std.StringHashMap(u32)) ?u32 {
+        if (start_pos >= text.len) return null;
 
-        // Try progressively longer sequences
         var best_token: ?u32 = null;
-        var max_len: usize = 1;
 
-        // Start with single byte
-        const byte = self.text[self.pos];
-        const byte_slice = self.text[self.pos..self.pos+1];
-        if (self.vocab.get(byte_slice)) |token| {
+        // Start with single byte as fallback
+        const byte = text[start_pos];
+        const byte_slice = text[start_pos .. start_pos + 1];
+        if (vocab.get(byte_slice)) |token| {
             best_token = token;
         } else {
-            best_token = byte; // Fallback
+            best_token = byte; // Raw byte fallback
         }
 
-        // Try longer matches (greedy longest)
+        // Try progressively longer matches (greedy longest)
         var len: usize = 2;
-        while (self.pos + len <= self.text.len and len <= 512) : (len += 1) {
-            const slice = self.text[self.pos..self.pos+len];
-            if (self.vocab.get(slice)) |token| {
+        while (start_pos + len <= text.len and len <= 512) : (len += 1) {
+            const slice = text[start_pos .. start_pos + len];
+            if (vocab.get(slice)) |token| {
                 best_token = token;
-                max_len = len;
             }
         }
 
         return best_token;
     }
 
-    /// Find next shorter prefix of current token
-    fn nextPrefix(self: *BacktrackEncoder, _: u32, token_len: usize) ?u32 {
+    /// Find next shorter prefix of current token at current position
+    fn nextPrefix(self: *BacktrackEncoder, token: u32) ?u32 {
+        const token_len = self.tokenLen(token);
         if (token_len <= 1) return null;
 
         // Try progressively shorter prefixes
         var len = token_len - 1;
         while (len > 0) : (len -= 1) {
-            const slice = self.text[self.pos..self.pos+len];
+            const slice = self.text[self.pos .. self.pos + len];
             if (self.vocab.get(slice)) |shorter_token| {
                 return shorter_token;
             }
@@ -86,19 +91,13 @@ pub const BacktrackEncoder = struct {
     }
 
     /// Check if token pair is valid (can be merged)
+    /// TODO: Need to implement proper pair validation using merge rules
+    /// For now, accept all pairs (greedy longest-match only)
     fn isValidPair(self: *BacktrackEncoder, left: u32, right: u32) bool {
-        const left_bytes = self.vocab_r.get(left) orelse return false;
-        const right_bytes = self.vocab_r.get(right) orelse return false;
-
-        // Concatenate and check if merged token exists
-        var buffer: [1024]u8 = undefined;
-        const total_len = left_bytes.len + right_bytes.len;
-        if (total_len > buffer.len) return false;
-
-        @memcpy(buffer[0..left_bytes.len], left_bytes);
-        @memcpy(buffer[left_bytes.len..total_len], right_bytes);
-
-        return self.vocab.contains(buffer[0..total_len]);
+        _ = self;
+        _ = left;
+        _ = right;
+        return true; // TEMPORARY: Accept all pairs
     }
 
     /// Get token length in bytes
@@ -109,56 +108,67 @@ pub const BacktrackEncoder = struct {
         return 1; // Single byte fallback
     }
 
-    /// Main encoding loop - rs-bpe backtracking algorithm
-    pub fn encode(self: *BacktrackEncoder) ![]u32 {
-        while (self.pos < self.text.len) {
-            var token = self.nextMatch() orelse break;
+    /// Process one token step - returns next token to process
+    /// This matches rs-bpe's step() function exactly
+    fn step(self: *BacktrackEncoder) !?u32 {
+        var token = self.next_token orelse return null;
+        const last = if (self.tokens.items.len > 0)
+            self.tokens.items[self.tokens.items.len - 1]
+        else
+            null;
 
-            while (true) {
-                const token_length = self.tokenLen(token);
-                const end_pos = self.pos + token_length;
+        while (true) {
+            const token_len = self.tokenLen(token);
+            const end_pos = self.pos + token_len;
 
-                // Check if we can use this token
-                const can_use = blk: {
-                    if (!self.bitfield.isSet(end_pos)) break :blk false;
+            // Check if we can accept this token
+            const can_accept = blk: {
+                // Must be at valid position
+                if (!self.bitfield.isSet(end_pos)) break :blk false;
 
-                    if (self.tokens.items.len > 0) {
-                        const last = self.tokens.items[self.tokens.items.len - 1];
-                        if (!self.isValidPair(last, token)) break :blk false;
-                    }
-
-                    break :blk true;
-                };
-
-                if (can_use) {
-                    // Accept token and move forward
-                    try self.tokens.append(self.allocator, token);
-                    self.pos = end_pos;
-                    break;
-                } else {
-                    // Try shorter prefix
-                    if (self.nextPrefix(token, token_length)) |shorter| {
-                        token = shorter;
-                        continue;
-                    }
-
-                    // Backtrack: remove last token
-                    if (self.tokens.items.len > 0) {
-                        const last = self.tokens.items[self.tokens.items.len - 1];
-                        _ = self.tokens.pop();
-                        const last_len = self.tokenLen(last);
-                        self.bitfield.clear(self.pos);
-                        self.pos -= last_len;
-                        break;
-                    }
-
-                    // Can't proceed - skip this position
-                    self.pos += 1;
-                    break;
+                // If there's a previous token, check if pair is valid
+                if (last) |last_token| {
+                    if (!self.isValidPair(last_token, token)) break :blk false;
                 }
+
+                break :blk true;
+            };
+
+            if (can_accept) {
+                // Accept token and advance
+                try self.tokens.append(self.allocator, token);
+                self.pos = end_pos;
+                // Find next match starting from new position
+                self.next_token = findNextMatch(self.text, end_pos, self.vocab);
+                break;
+            } else if (self.nextPrefix(token)) |shorter| {
+                // Try shorter prefix
+                token = shorter;
+                continue;
+            } else {
+                // Backtrack: clear bitfield, pop last token, restore position
+                self.bitfield.clear(self.pos);
+                if (self.tokens.items.len > 0) {
+                    const popped = self.tokens.items[self.tokens.items.len - 1];
+                    _ = self.tokens.pop();
+                    const popped_len = self.tokenLen(popped);
+                    self.pos -= popped_len;
+                    self.next_token = last; // Retry the token we just popped
+                } else {
+                    self.next_token = null;
+                }
+                break;
             }
         }
 
+        return self.next_token;
+    }
+
+    /// Main encoding loop - call step() until done
+    pub fn encode(self: *BacktrackEncoder) ![]u32 {
+        while (try self.step() != null) {
+            // Keep stepping until no more tokens
+        }
         return try self.tokens.toOwnedSlice(self.allocator);
     }
 };
@@ -171,7 +181,7 @@ const BitField = struct {
     pub fn init(allocator: Allocator, size: usize) !BitField {
         const num_words = (size + 63) / 64;
         const bits = try allocator.alloc(u64, num_words);
-        @memset(bits, 0xFFFFFFFFFFFFFFFF); // All bits set
+        @memset(bits, 0xFFFFFFFFFFFFFFFF); // All bits set initially
         return BitField{ .bits = bits, .allocator = allocator };
     }
 

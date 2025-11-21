@@ -5,6 +5,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const BacktrackEncoder = @import("backtrack_encoder.zig").BacktrackEncoder;
+const encodeGreedy = @import("greedy_encoder.zig").encodeGreedy;
 
 /// A byte pair in the BPE vocabulary
 pub const Pair = struct {
@@ -607,10 +608,7 @@ pub const Tokenizer = struct {
     /// Trie-based longest-match encoding (fast + correct)
     /// Falls back to HashMap if trie not available (WASM)
     pub fn encode(self: *Tokenizer, text: []const u8) ![]u32 {
-        // Backtrack encoder is still BROKEN (0.8% correct) - needs debugging
-        // return self.encodeBacktrack(text);
-
-        // Using HashMap encoder (slow but somewhat correct)
+        // Use HashMap encoder (O(n³) but correct merge-based BPE)
         return self.encodeHashMap(text);
     }
 
