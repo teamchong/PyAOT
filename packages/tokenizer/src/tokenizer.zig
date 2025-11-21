@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const BacktrackEncoder = @import("backtrack_encoder.zig").BacktrackEncoder;
 const encodeGreedy = @import("greedy_encoder.zig").encodeGreedy;
+const encodeOptimized = @import("optimized_hashmap_encoder.zig").encodeOptimized;
 
 /// A byte pair in the BPE vocabulary
 pub const Pair = struct {
@@ -608,8 +609,8 @@ pub const Tokenizer = struct {
     /// Trie-based longest-match encoding (fast + correct)
     /// Falls back to HashMap if trie not available (WASM)
     pub fn encode(self: *Tokenizer, text: []const u8) ![]u32 {
-        // Use HashMap encoder (O(n³) but correct merge-based BPE)
-        return self.encodeHashMap(text);
+        // Use optimized HashMap encoder (O(n²) merge-based BPE)
+        return encodeOptimized(self.allocator, text, &self.vocab, &self.vocab_r);
     }
 
     /// Backtracking encoder - rs-bpe algorithm

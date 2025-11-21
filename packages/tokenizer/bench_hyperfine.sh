@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 echo "⚡ Quick Benchmark (for rapid iteration)"
 echo "═══════════════════════════════════════"
-echo "Testing: rs-bpe, TokenDagger, tiktoken"
+echo "Testing: PyAOT, rs-bpe, TokenDagger, tiktoken"
 echo "Iterations: 100 (vs 1000 in full benchmark)"
 echo ""
 
@@ -69,6 +69,15 @@ for _ in range(100):
     for t in texts: enc.encode(t)
 PYEOF
 
+# PyAOT native benchmark (calls tokenizer_bench directly)
+# tokenizer_bench already does 100 iterations internally
+cat > /tmp/bench_quick_pyaot.sh <<SHEOF
+#!/bin/bash
+cd ${BENCH_DIR}
+./zig-out/bin/tokenizer_bench 100
+SHEOF
+chmod +x /tmp/bench_quick_pyaot.sh
+
 echo "Running hyperfine (583 texts × 100 iterations, 3 runs)..."
 echo ""
 
@@ -78,6 +87,7 @@ hyperfine \
     --runs 3 \
     --export-markdown bench_quick_results.md \
     --ignore-failure \
+    --command-name "PyAOT" "/tmp/bench_quick_pyaot.sh" \
     --command-name "rs-bpe" "python3 /tmp/bench_quick_rsbpe.py" \
     --command-name "TokenDagger" "python3 /tmp/bench_quick_tokendagger.py" \
     --command-name "tiktoken" "python3 /tmp/bench_quick_tiktoken.py"
