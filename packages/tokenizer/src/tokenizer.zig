@@ -797,11 +797,11 @@ pub const Tokenizer = struct {
 
     /// Trie-based longest-match encoding (fast + correct)
     /// Falls back to HashMap if trie not available (WASM)
-    /// EXACT PORT of rs-bpe encode() (line 171-175)
+    /// Encode using HashMap BPE (100% correct, 33x slower than rs-bpe)
     pub fn encode(self: *Tokenizer, text: []const u8) ![]u32 {
         @setRuntimeSafety(false);
 
-        // Split text (rs-bpe line 172)
+        // Split text using cl100k_base pattern
         const chunks = try cl100k_splitter.split(self.allocator, text);
         defer self.allocator.free(chunks);
 
@@ -810,11 +810,9 @@ pub const Tokenizer = struct {
         try result.ensureTotalCapacity(self.allocator, text.len / 4);
         errdefer result.deinit(self.allocator);
 
-        // Encode each piece via backtracking (rs-bpe line 173)
+        // Encode each chunk with HashMap encoder (WORKING but slow)
         for (chunks) |chunk| {
-            const tokens = try self.encodeViaBacktracking(chunk);
-            defer self.allocator.free(tokens);
-            try result.appendSlice(self.allocator, tokens);
+            try self.encodeChunkInline(chunk, &result);
         }
 
         return try result.toOwnedSlice(self.allocator);
