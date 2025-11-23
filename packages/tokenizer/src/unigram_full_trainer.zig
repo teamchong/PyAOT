@@ -423,19 +423,30 @@ pub const UnigramTrainer = struct {
 
     /// Train Unigram model using EM algorithm
     pub fn train(self: *UnigramTrainer, sentences: []const Sentence) !Unigram {
+        const start_total = std.time.nanoTimestamp();
+
         // 1. Generate seed vocabulary
+        const start_seed = std.time.nanoTimestamp();
         var pieces = try self.makeSeedPieces(sentences);
         defer {
             for (pieces.items) |*piece| piece.deinit(self.allocator);
             pieces.deinit(self.allocator);
         }
+        const seed_ms = @divFloor(std.time.nanoTimestamp() - start_seed, 1_000_000);
+        std.debug.print("[PROFILE] Seed generation: {d}ms ({d} pieces)\n", .{seed_ms, pieces.items.len});
 
         const desired_vocab_size = (self.config.vocab_size * 11) / 10;  // 1.1x target
+        std.debug.print("[PROFILE] Target vocab: {d}, Desired: {d}\n", .{self.config.vocab_size, desired_vocab_size});
 
         // 2. EM iterations
+        var em_iteration: u32 = 0;
         while (pieces.items.len > desired_vocab_size) {
+            const start_em = std.time.nanoTimestamp();
+            em_iteration += 1;
             // Sub-iterations of EM
             var iter: u32 = 0;
+            var total_estep_ms: i128 = 0;
+            var total_mstep_ms: i128 = 0;
             while (iter < self.config.n_sub_iterations) : (iter += 1) {
                 // Convert to VocabEntry for model
                 var vocab = try self.allocator.alloc(VocabEntry, pieces.items.len);
@@ -453,16 +464,22 @@ pub const UnigramTrainer = struct {
                 defer model.deinit();
 
                 // E-step
+                const start_estep = std.time.nanoTimestamp();
                 const e_result = try self.runEStep(&model, sentences);
                 const expected = e_result[1];
                 defer self.allocator.free(expected);
+                const estep_ms = @divFloor(std.time.nanoTimestamp() - start_estep, 1_000_000);
+                total_estep_ms += estep_ms;
 
                 // M-step
+                const start_mstep = std.time.nanoTimestamp();
                 var new_pieces = try self.runMStep(pieces.items, expected);
                 defer {
                     for (new_pieces.items) |*piece| piece.deinit(self.allocator);
                     new_pieces.deinit(self.allocator);
                 }
+                const mstep_ms = @divFloor(std.time.nanoTimestamp() - start_mstep, 1_000_000);
+                total_mstep_ms += mstep_ms;
 
                 // Update pieces
                 for (pieces.items) |*piece| piece.deinit(self.allocator);
@@ -478,6 +495,7 @@ pub const UnigramTrainer = struct {
             }
 
             // Prune vocabulary
+            const start_prune = std.time.nanoTimestamp();
             const pruned_size = @as(usize, @intFromFloat(@as(f64, @floatFromInt(pieces.items.len)) * self.config.shrinking_factor));
             const target_size = @max(desired_vocab_size, pruned_size);
 
@@ -498,11 +516,19 @@ pub const UnigramTrainer = struct {
                     .score = piece.score,
                 });
             }
+            const prune_ms = @divFloor(std.time.nanoTimestamp() - start_prune, 1_000_000);
+
+            const em_ms = @divFloor(std.time.nanoTimestamp() - start_em, 1_000_000);
+            std.debug.print("[PROFILE] EM {d}: E-step={d}ms M-step={d}ms Prune={d}ms Total={d}ms (vocab: {d} -> {d})\n",
+                .{em_iteration, total_estep_ms, total_mstep_ms, prune_ms, em_ms, pruned.items.len, pieces.items.len});
 
             if (pieces.items.len <= desired_vocab_size) {
                 break;
             }
         }
+
+        const total_ms = @divFloor(std.time.nanoTimestamp() - start_total, 1_000_000);
+        std.debug.print("[PROFILE] Total training time: {d}ms ({d} EM iterations)\n", .{total_ms, em_iteration});
 
         // Final model - create vocab (Unigram.init will duplicate strings)
         var vocab = try self.allocator.alloc(VocabEntry, pieces.items.len);

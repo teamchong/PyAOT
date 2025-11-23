@@ -1,10 +1,17 @@
-/// Direct BLAS/LAPACK calls for NumPy compatibility
-/// Zero overhead - no PyObject* conversion
+/// NumPy-compatible array operations with PyObject integration
+/// Uses direct BLAS calls for performance while maintaining Python compatibility
 ///
-/// This module provides direct C library calls for numerical operations,
-/// bypassing Python's interpreter entirely for maximum performance.
+/// This module wraps BLAS operations in PyObject for runtime integration
+/// while keeping computational kernels at C speed.
 
 const std = @import("std");
+
+// Import runtime for PyObject and NumpyArray support
+// This assumes runtime package is available in the import path
+const runtime = struct {
+    pub usingnamespace @import("../runtime/src/runtime.zig");
+    pub const NumpyArray = @import("../runtime/src/numpy_array.zig").NumpyArray;
+};
 
 // BLAS C interface - Direct extern declarations
 // Note: This requires linking with a BLAS implementation (OpenBLAS, Apple Accelerate, etc.)
@@ -35,54 +42,94 @@ extern "c" fn cblas_dgemm(
 const CblasRowMajor: c_int = 101;
 const CblasNoTrans: c_int = 111;
 
-/// Create array from integer slice
-/// Converts i64 → f64 for BLAS compatibility
-pub fn array(data: []const i64, allocator: std.mem.Allocator) ![]f64 {
-    const result = try allocator.alloc(f64, data.len);
+/// Create NumPy array from integer slice (Python: np.array([1,2,3]))
+/// Converts i64 → f64 and wraps in PyObject
+pub fn array(data: []const i64, allocator: std.mem.Allocator) !*runtime.PyObject {
+    // Convert i64 to f64
+    const float_data = try allocator.alloc(f64, data.len);
     for (data, 0..) |val, i| {
-        result[i] = @floatFromInt(val);
+        float_data[i] = @floatFromInt(val);
     }
-    return result;
+
+    // Create NumpyArray from float data
+    const np_array = try runtime.NumpyArray.fromSlice(allocator, float_data);
+    allocator.free(float_data); // NumpyArray makes its own copy
+
+    // Wrap in PyObject
+    return try runtime.numpy_array.createPyObject(allocator, np_array);
 }
 
-/// Create array from float slice (no conversion needed)
-pub fn arrayFloat(data: []const f64, allocator: std.mem.Allocator) ![]f64 {
-    const result = try allocator.alloc(f64, data.len);
-    @memcpy(result, data);
-    return result;
+/// Create array from float slice (Python: np.array([1.0, 2.0, 3.0]))
+/// Wraps in PyObject
+pub fn arrayFloat(data: []const f64, allocator: std.mem.Allocator) !*runtime.PyObject {
+    const np_array = try runtime.NumpyArray.fromSlice(allocator, data);
+    return try runtime.numpy_array.createPyObject(allocator, np_array);
 }
 
-/// Vector dot product using BLAS Level 1
+/// Create array of zeros (Python: np.zeros(shape))
+pub fn zeros(shape_spec: []const usize, allocator: std.mem.Allocator) !*runtime.PyObject {
+    const np_array = try runtime.NumpyArray.zeros(allocator, shape_spec);
+    return try runtime.numpy_array.createPyObject(allocator, np_array);
+}
+
+/// Create array of ones (Python: np.ones(shape))
+pub fn ones(shape_spec: []const usize, allocator: std.mem.Allocator) !*runtime.PyObject {
+    const np_array = try runtime.NumpyArray.ones(allocator, shape_spec);
+    return try runtime.numpy_array.createPyObject(allocator, np_array);
+}
+
+/// Vector dot product using BLAS Level 1 (Python: np.dot(a, b))
 /// Computes: a · b = sum(a[i] * b[i])
-pub fn dot(a: []const f64, b: []const f64) f64 {
-    std.debug.assert(a.len == b.len);
+/// Returns: PyObject wrapping float result
+pub fn dot(a_obj: *runtime.PyObject, b_obj: *runtime.PyObject, allocator: std.mem.Allocator) !*runtime.PyObject {
+    // Extract NumPy arrays from PyObjects
+    const a_arr = try runtime.numpy_array.extractArray(a_obj);
+    const b_arr = try runtime.numpy_array.extractArray(b_obj);
+
+    std.debug.assert(a_arr.size == b_arr.size);
 
     // Use BLAS ddot: double precision dot product
-    return cblas_ddot(
-        @intCast(a.len),  // N: number of elements
-        a.ptr,            // X: pointer to first vector
-        1,                // incX: stride for X
-        b.ptr,            // Y: pointer to second vector
-        1                 // incY: stride for Y
+    const result = cblas_ddot(
+        @intCast(a_arr.size),  // N: number of elements
+        a_arr.data.ptr,        // X: pointer to first vector
+        1,                     // incX: stride for X
+        b_arr.data.ptr,        // Y: pointer to second vector
+        1                      // incY: stride for Y
     );
+
+    // Wrap result in PyFloat
+    return try runtime.PyFloat.create(allocator, result);
 }
 
-/// Sum all elements in array
-/// Uses BLAS dasum for absolute values, but we want regular sum
-/// So we use a simple loop for now (could optimize with SIMD later)
-pub fn sum(arr: []const f64) f64 {
+/// Sum all elements in array (Python: np.sum(arr))
+/// Returns: PyObject wrapping float result
+pub fn sum(arr_obj: *runtime.PyObject, allocator: std.mem.Allocator) !*runtime.PyObject {
+    const arr = try runtime.numpy_array.extractArray(arr_obj);
+
     var total: f64 = 0.0;
-    for (arr) |val| {
+    for (arr.data) |val| {
         total += val;
     }
-    return total;
+
+    return try runtime.PyFloat.create(allocator, total);
 }
 
-/// Calculate mean (average) of array elements
-pub fn mean(arr: []const f64) f64 {
-    if (arr.len == 0) return 0.0;
-    const total = sum(arr);
-    return total / @as(f64, @floatFromInt(arr.len));
+/// Calculate mean (average) of array elements (Python: np.mean(arr))
+/// Returns: PyObject wrapping float result
+pub fn mean(arr_obj: *runtime.PyObject, allocator: std.mem.Allocator) !*runtime.PyObject {
+    const arr = try runtime.numpy_array.extractArray(arr_obj);
+
+    if (arr.size == 0) {
+        return try runtime.PyFloat.create(allocator, 0.0);
+    }
+
+    var total: f64 = 0.0;
+    for (arr.data) |val| {
+        total += val;
+    }
+
+    const avg = total / @as(f64, @floatFromInt(arr.size));
+    return try runtime.PyFloat.create(allocator, avg);
 }
 
 /// Transpose matrix (in-place for square matrices, allocates for non-square)
@@ -141,37 +188,82 @@ pub fn len(arr: []const f64) usize {
     return arr.len;
 }
 
-test "array creation" {
+test "array creation from integers" {
     const allocator = std.testing.allocator;
 
     const data = [_]i64{1, 2, 3, 4, 5};
-    const arr = try array(&data, allocator);
-    defer allocator.free(arr);
+    const arr_obj = try array(&data, allocator);
+    defer {
+        const arr = runtime.numpy_array.extractArray(arr_obj) catch unreachable;
+        arr.deinit();
+        allocator.destroy(arr_obj);
+    }
 
-    try std.testing.expectEqual(@as(usize, 5), arr.len);
-    try std.testing.expectEqual(@as(f64, 1.0), arr[0]);
-    try std.testing.expectEqual(@as(f64, 5.0), arr[4]);
+    const arr = try runtime.numpy_array.extractArray(arr_obj);
+    try std.testing.expectEqual(@as(usize, 5), arr.size);
+    try std.testing.expectEqual(@as(f64, 1.0), arr.data[0]);
+    try std.testing.expectEqual(@as(f64, 5.0), arr.data[4]);
 }
 
-test "dot product" {
-    const a = [_]f64{1.0, 2.0, 3.0};
-    const b = [_]f64{4.0, 5.0, 6.0};
+test "dot product with PyObject" {
+    const allocator = std.testing.allocator;
 
-    const result = dot(&a, &b);
+    const a_data = [_]f64{1.0, 2.0, 3.0};
+    const b_data = [_]f64{4.0, 5.0, 6.0};
+
+    const a_obj = try arrayFloat(&a_data, allocator);
+    const b_obj = try arrayFloat(&b_data, allocator);
+    defer {
+        const a = runtime.numpy_array.extractArray(a_obj) catch unreachable;
+        const b = runtime.numpy_array.extractArray(b_obj) catch unreachable;
+        a.deinit();
+        b.deinit();
+        allocator.destroy(a_obj);
+        allocator.destroy(b_obj);
+    }
+
+    const result_obj = try dot(a_obj, b_obj, allocator);
+    defer allocator.destroy(result_obj);
+
+    const result_float = @as(*runtime.PyFloat, @ptrCast(@alignCast(result_obj.data)));
     // Expected: 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
-    try std.testing.expectEqual(@as(f64, 32.0), result);
+    try std.testing.expectEqual(@as(f64, 32.0), result_float.value);
 }
 
-test "sum" {
-    const arr = [_]f64{1.0, 2.0, 3.0, 4.0, 5.0};
-    const result = sum(&arr);
+test "sum with PyObject" {
+    const allocator = std.testing.allocator;
+
+    const arr_data = [_]f64{1.0, 2.0, 3.0, 4.0, 5.0};
+    const arr_obj = try arrayFloat(&arr_data, allocator);
+    defer {
+        const arr = runtime.numpy_array.extractArray(arr_obj) catch unreachable;
+        arr.deinit();
+        allocator.destroy(arr_obj);
+    }
+
+    const result_obj = try sum(arr_obj, allocator);
+    defer allocator.destroy(result_obj);
+
+    const result_float = @as(*runtime.PyFloat, @ptrCast(@alignCast(result_obj.data)));
     // Expected: 1 + 2 + 3 + 4 + 5 = 15
-    try std.testing.expectEqual(@as(f64, 15.0), result);
+    try std.testing.expectEqual(@as(f64, 15.0), result_float.value);
 }
 
-test "mean" {
-    const arr = [_]f64{1.0, 2.0, 3.0, 4.0, 5.0};
-    const result = mean(&arr);
+test "mean with PyObject" {
+    const allocator = std.testing.allocator;
+
+    const arr_data = [_]f64{1.0, 2.0, 3.0, 4.0, 5.0};
+    const arr_obj = try arrayFloat(&arr_data, allocator);
+    defer {
+        const arr = runtime.numpy_array.extractArray(arr_obj) catch unreachable;
+        arr.deinit();
+        allocator.destroy(arr_obj);
+    }
+
+    const result_obj = try mean(arr_obj, allocator);
+    defer allocator.destroy(result_obj);
+
+    const result_float = @as(*runtime.PyFloat, @ptrCast(@alignCast(result_obj.data)));
     // Expected: 15 / 5 = 3.0
-    try std.testing.expectEqual(@as(f64, 3.0), result);
+    try std.testing.expectEqual(@as(f64, 3.0), result_float.value);
 }

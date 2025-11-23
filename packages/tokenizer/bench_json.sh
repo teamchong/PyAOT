@@ -6,9 +6,10 @@ cd "$(dirname "$0")"
 
 echo "📊 JSON Parse & Stringify Benchmark"
 echo "═══════════════════════════════════"
-echo "Operations: Parse JSON × 100K | Stringify × 100K"
+echo "Operations: Parse JSON × 50K | Stringify × 50K"
 echo "Data: 62KB realistic JSON with nested structures"
-echo "Total: 6.2GB processed per benchmark (100K × 62KB)"
+echo "Total: 3.1GB processed per benchmark (50K × 62KB)"
+echo "Runtime: ~5 minutes (reduced from 20min for faster iteration)"
 echo ""
 
 # Create realistic large JSON data if not exists
@@ -130,7 +131,7 @@ pub fn main() !void {
     const json_data = try file.readToEndAlloc(allocator, 1024 * 1024);
     defer allocator.free(json_data);
 
-    for (0..100_000) |_| {
+    for (0..50_000) |_| {
         const parsed = try std.json.parseFromSlice(
             std.json.Value,
             allocator,
@@ -174,7 +175,7 @@ use std::fs;
 fn main() {
     let json_data = fs::read_to_string("sample.json").expect("Failed to read");
 
-    for _ in 0..100_000 {
+    for _ in 0..50_000 {
         let _parsed: serde_json::Value = serde_json::from_str(&json_data).expect("Failed to parse");
     }
 }
@@ -252,7 +253,7 @@ import (
 func main() {
     data, _ := os.ReadFile("sample.json")
 
-    for i := 0; i < 100000; i++ {
+    for i := 0; i < 50000; i++ {
         var parsed interface{}
         json.Unmarshal(data, &parsed)
     }
@@ -288,7 +289,7 @@ func main() {
     var parsed interface{}
     json.Unmarshal(data, &parsed)
 
-    for i := 0; i < 100000; i++ {
+    for i := 0; i < 50000; i++ {
         json.Marshal(parsed)
     }
 }
@@ -311,7 +312,7 @@ import json
 with open('sample.json') as f:
     json_data = f.read()
 
-for _ in range(100_000):
+for _ in range(50_000):
     parsed = json.loads(json_data)
 PYEOF
 
@@ -324,7 +325,7 @@ with open('sample.json') as f:
 
 parsed = json.loads(json_data)
 
-for _ in range(100_000):
+for _ in range(50_000):
     stringified = json.dumps(parsed)
 PYEOF
 
@@ -353,7 +354,7 @@ fi
 PARSE_CMD=(
     hyperfine
     --warmup 2
-    --runs 5
+    --runs 3
     --export-markdown bench_json_parse_results.md
     --command-name "Zig (stdlib parse)" "/tmp/bench_json_parse_zig"
     --command-name "Python (parse)" "python3 /tmp/bench_json_parse_python.py"
@@ -398,7 +399,7 @@ fi
 STRINGIFY_CMD=(
     hyperfine
     --warmup 2
-    --runs 5
+    --runs 3
     --export-markdown bench_json_stringify_results.md
     --command-name "Python (stringify)" "python3 /tmp/bench_json_stringify_python.py"
 )
