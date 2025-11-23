@@ -55,6 +55,9 @@ pub const Lattice = struct {
     bos_id: usize,
     eos_id: usize,
     allocator: Allocator,
+    /// Optional arena allocator for node allocations (performance optimization)
+    /// If provided, all nodes are allocated from arena and freed in one shot
+    arena: ?*std.heap.ArenaAllocator,
 
     pub fn init(allocator: Allocator, sentence: []const u8, bos_id: usize, eos_id: usize) !Lattice {
         const len = sentence.len;

@@ -111,33 +111,26 @@ pub const PrefixTrie = struct {
             var current = self.current_node orelse return;
             var pos: usize = 0;
 
+            // Traverse the trie following the input text
             while (pos < self.text.len) {
                 const byte = self.text[pos];
-
-                // If this node is a terminal, it's a match
-                if (current.value) |id| {
-                    try self.matches.append(self.trie.allocator, .{
-                        .len = pos,
-                        .id = id,
-                    });
-                }
 
                 // Try to follow edge for this byte
                 if (current.children.get(byte)) |child| {
                     current = child;
                     pos += 1;
+
+                    // After advancing, check if this position is a terminal (complete token)
+                    if (current.value) |id| {
+                        try self.matches.append(self.trie.allocator, .{
+                            .len = pos,
+                            .id = id,
+                        });
+                    }
                 } else {
                     // No more matches possible
                     break;
                 }
-            }
-
-            // Check if final position is a terminal
-            if (current.value) |id| {
-                try self.matches.append(self.trie.allocator, .{
-                    .len = pos,
-                    .id = id,
-                });
             }
         }
 
