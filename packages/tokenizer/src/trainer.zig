@@ -256,6 +256,7 @@ pub const Trainer = struct {
             .aho_corasick = null, // Not needed for trainer
             .next_prefix_match = next_prefix_match,
             .allocator = self.allocator,
+            .encode_arena = std.heap.ArenaAllocator.init(self.allocator),
         };
     }
 };
