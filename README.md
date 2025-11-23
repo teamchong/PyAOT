@@ -146,27 +146,23 @@ print(words[0])  # Hello
 
 Benchmarked with [hyperfine](https://github.com/sharkdp/hyperfine) on macOS ARM64 (Apple Silicon).
 
-**Fibonacci(45) - 4-Language Comparison (~60s runtime for fair comparison):**
+**Fibonacci(45) - Recursive Computation (~60-100s runtime):**
 
-| Language | Time | vs PyAOT | vs Rust | vs CPython |
-|:---------|-----:|---------:|--------:|-----------:|
-| **PyAOT (Zig)** | **3.28s ± 0.01s** | **1.00x** 🏆 | 1.01x faster | **30.72x faster** |
-| **Rust 1.91** | **3.30s ± 0.01s** | 1.01x slower | **1.00x** | 30.52x faster |
-| **Go 1.25** | **3.66s ± 0.03s** | 1.12x slower | 1.11x slower | 27.47x faster |
-| CPython 3.13 | 100.59s ± 2.37s | 30.72x slower | 30.52x slower | 1.00x |
+| Language | Time | vs PyAOT | vs CPython |
+|:---------|-----:|---------:|-----------:|
+| **PyAOT (Zig)** | **3.28s ± 0.01s** | **1.00x** 🏆 | **30.72x faster** |
+| **Rust 1.91** | **3.30s ± 0.01s** | 1.01x slower | 30.52x faster |
+| **Go 1.25** | **3.66s ± 0.03s** | 1.12x slower | 27.47x faster |
+| CPython 3.13 | 100.59s ± 2.37s | 30.72x slower | 1.00x |
 
-**Key takeaways:**
-- **PyAOT beats Rust by 1.01x** - faster than systems languages! 🚀
-- **PyAOT beats Go by 1.12x** - outperforms compiled Go
-- **30.72x faster than CPython** - massive speedup for recursive algorithms
-- **Zero Python runtime** - pure native code, Rust/Go-level performance
+**Startup Time - Hello World (100 runs):**
 
-**Performance highlights:**
-- **Fibonacci:** 30.72x faster than CPython, beats Rust/Go (verified benchmark)
-- **Tokenizer:** 1.55x faster than Rust rs-bpe (fastest BPE encoder)
-- **JSON:** Currently slower than Rust/Python on large documents - optimization in progress
-- **Startup:** 7.8x faster instant binary execution (3.0ms vs 23.5ms)
-- **Range:** Varies by workload - fastest on compute-heavy tasks
+| Language | Time | vs PyAOT | vs CPython |
+|:---------|-----:|---------:|-----------:|
+| **Rust 1.91** | **1.8ms ± 0.1ms** | **1.67x faster** | 12.72x faster |
+| **Go 1.25** | **2.6ms ± 0.3ms** | 1.15x faster | 8.81x faster |
+| **PyAOT (Zig)** | **3.0ms ± 0.2ms** | **1.00x** | **7.63x faster** |
+| CPython 3.13 | 22.9ms ± 0.7ms | 7.63x slower | 1.00x |
 
 ### JSON Benchmark (100K iterations × 62KB realistic JSON)
 
@@ -406,11 +402,7 @@ make test              # Run regex tests
 make clean             # Clean artifacts
 ```
 
-**Key Highlights:**
-- ✅ **5 libraries tested** for encoding (rs-bpe, tiktoken, TokenDagger, HuggingFace, PyAOT)
-- ✅ **TokenDagger auto-builds** - no manual setup required
-- ✅ **<2% overhead** - measures actual library performance
-- ✅ **Pure hyperfine** - statistical rigor across all benchmarks
+5 libraries tested | TokenDagger auto-builds | <2% overhead | Hyperfine statistical rigor
 
 **Run all benchmarks:**
 ```bash

@@ -1,10 +1,10 @@
 #!/bin/bash
-# Startup time benchmark: CPython vs PyAOT (cold start)
+# Startup time benchmark: 4-Language comparison (Hello World)
 set -e
 
-echo "⚡ Startup Time Benchmark: Hello World"
-echo "========================================"
-echo "Measuring pure startup overhead (no computation)"
+echo "⚡ Startup Time Benchmark: 4-Language Comparison"
+echo "================================================="
+echo "Measuring pure startup overhead (Hello World)"
 echo ""
 
 # Pre-compile PyAOT binary
@@ -22,8 +22,10 @@ hyperfine \
     --runs 100 \
     --shell=none \
     --export-markdown bench_startup_results.md \
-    --command-name "CPython 3.13" 'python3 hello.py' \
-    --command-name "PyAOT (native binary)" '../.pyaot/hello'
+    --command-name "PyAOT (Zig)" '../.pyaot/hello' \
+    --command-name "Rust 1.91" './hello_rust' \
+    --command-name "Go 1.25" './hello_go' \
+    --command-name "CPython 3.13" 'python3 hello.py'
 
 echo ""
 echo "📊 Results saved to bench_startup_results.md"
