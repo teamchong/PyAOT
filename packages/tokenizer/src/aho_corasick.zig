@@ -137,7 +137,11 @@ pub const AhoCorasick = struct {
             }
         }
 
-        return try matches.toOwnedSlice(allocator);
+        // Avoid toOwnedSlice overhead - just dupe used portion
+        const items = matches.items[0..matches.items.len];
+        const owned = try allocator.dupe(u32, items);
+        matches.clearRetainingCapacity();
+        return owned;
     }
 
     /// Port of next_state_id_unchecked()

@@ -176,7 +176,12 @@ pub const Tokenizer = struct {
         }
 
         try self.applyMergesHashMapArrayList(&tokens);
-        return try tokens.toOwnedSlice(self.allocator);
+
+        // Avoid toOwnedSlice overhead - just dupe used portion
+        const items = tokens.items[0..tokens.items.len];
+        const owned = try self.allocator.dupe(u32, items);
+        tokens.clearRetainingCapacity();
+        return owned;
     }
 
     /// Vocab-based BPE merging (tiktoken style) - OPTIMIZED O(n²)
@@ -330,7 +335,9 @@ pub const Tokenizer = struct {
             try result.appendSlice(self.allocator, chunk_tokens);
         }
 
-        return try result.toOwnedSlice(self.allocator);
+        // Return exact-sized copy (skip toOwnedSlice's shrink operation)
+        const items = result.items[0..result.items.len];
+        return try self.allocator.dupe(u32, items);
     }
 
     /// ZERO-ALLOCATION stack-based encoding with comptime specialization
@@ -440,7 +447,11 @@ pub const Tokenizer = struct {
             }
         }
 
-        return try result.toOwnedSlice(self.allocator);
+        // Avoid toOwnedSlice overhead - just dupe used portion
+        const items = result.items[0..result.items.len];
+        const owned = try self.allocator.dupe(u8, items);
+        result.clearRetainingCapacity();
+        return owned;
     }
 };
 

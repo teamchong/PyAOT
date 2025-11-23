@@ -42,5 +42,9 @@ pub fn encodeGreedy(
         }
     }
 
-    return try tokens.toOwnedSlice(allocator);
+    // Avoid toOwnedSlice overhead - just dupe used portion
+    const items = tokens.items[0..tokens.items.len];
+    const owned = try allocator.dupe(u32, items);
+    tokens.clearRetainingCapacity();
+    return owned;
 }

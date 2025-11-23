@@ -57,7 +57,11 @@ pub fn split(allocator: Allocator, text: []const u8) ![][]const u8 {
         try chunk_list.append(allocator, chunk);
     }
 
-    return try chunk_list.toOwnedSlice(allocator);
+    // Avoid toOwnedSlice overhead - just dupe used portion
+    const items = chunk_list.items[0..chunk_list.items.len];
+    const owned = try allocator.dupe([]const u8, items);
+    chunk_list.clearRetainingCapacity();
+    return owned;
 }
 
 /// Contractions - comptime array for fast lookup

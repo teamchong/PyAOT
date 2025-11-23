@@ -114,5 +114,9 @@ pub fn encodeOptimized(
         }
     }
 
-    return try result.toOwnedSlice(allocator);
+    // Avoid toOwnedSlice overhead - just dupe used portion
+    const items = result.items[0..result.items.len];
+    const owned = try allocator.dupe(u32, items);
+    result.clearRetainingCapacity();
+    return owned;
 }

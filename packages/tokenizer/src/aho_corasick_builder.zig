@@ -232,7 +232,11 @@ pub const Builder = struct {
             }
         }
 
-        return try states.toOwnedSlice(self.allocator);
+        // Avoid toOwnedSlice overhead - just dupe used portion
+        const items = states.items[0..states.items.len];
+        const owned = try self.allocator.dupe(State, items);
+        states.clearRetainingCapacity();
+        return owned;
     }
 
     /// Find conflict-free base value using block-based search
@@ -264,7 +268,11 @@ pub const Builder = struct {
             try outputs.append(self.allocator, nfa_state.output);
         }
 
-        return try outputs.toOwnedSlice(self.allocator);
+        // Avoid toOwnedSlice overhead - just dupe used portion
+        const items = outputs.items[0..outputs.items.len];
+        const owned = try self.allocator.dupe(u32, items);
+        outputs.clearRetainingCapacity();
+        return owned;
     }
 };
 
