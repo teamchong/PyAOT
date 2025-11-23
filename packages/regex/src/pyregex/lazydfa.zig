@@ -7,17 +7,41 @@ const StateId = nfa_mod.StateId;
 const Transition = nfa_mod.Transition;
 const MATCH_STATE = nfa_mod.MATCH_STATE;
 
-/// SIMD: Scan for whitespace using vectorized comparison
+/// SIMD: Scan for whitespace using vectorized comparison (32-byte then 16-byte)
 inline fn scanUntilWhitespace(text: []const u8, start: usize) usize {
     @setRuntimeSafety(false);
     var pos = start;
 
-    // SIMD: Process 16 bytes at once
+    // SIMD: Process 32 bytes at once (AVX2)
+    const Vec32 = @Vector(32, u8);
+    while (pos + 32 <= text.len) {
+        const chunk: Vec32 = text[pos..][0..32].*;
+
+        // Whitespace: space(32), tab(9), newline(10), carriage return(13)
+        const is_space = chunk == @as(Vec32, @splat(32));
+        const is_tab = chunk == @as(Vec32, @splat(9));
+        const is_newline = chunk == @as(Vec32, @splat(10));
+        const is_cr = chunk == @as(Vec32, @splat(13));
+
+        const is_whitespace = is_space | is_tab | is_newline | is_cr;
+
+        if (@reduce(.Or, is_whitespace)) {
+            // Found whitespace, scan byte-by-byte to find exact position
+            for (0..32) |i| {
+                const c = text[pos + i];
+                if (c == 32 or c == 9 or c == 10 or c == 13) {
+                    return pos + i;
+                }
+            }
+        }
+        pos += 32;
+    }
+
+    // SIMD: Process 16 bytes at once (SSE)
     const Vec16 = @Vector(16, u8);
     while (pos + 16 <= text.len) {
         const chunk: Vec16 = text[pos..][0..16].*;
 
-        // Whitespace: space(32), tab(9), newline(10), carriage return(13)
         const is_space = chunk == @as(Vec16, @splat(32));
         const is_tab = chunk == @as(Vec16, @splat(9));
         const is_newline = chunk == @as(Vec16, @splat(10));
@@ -26,7 +50,6 @@ inline fn scanUntilWhitespace(text: []const u8, start: usize) usize {
         const is_whitespace = is_space | is_tab | is_newline | is_cr;
 
         if (@reduce(.Or, is_whitespace)) {
-            // Found whitespace, scan byte-by-byte to find exact position
             for (0..16) |i| {
                 const c = text[pos + i];
                 if (c == 32 or c == 9 or c == 10 or c == 13) {
@@ -482,6 +505,46 @@ pub const LazyDFA = struct {
                     .end = pos,
                 });
             }
+        }
+
+        return matches.toOwnedSlice(allocator);
+    }
+
+    /// Find all URLs using SIMD fast path (OPTIMIZED for https?://[^\s]+)
+    fn findAllUrlFastPath(self: *LazyDFA, text: []const u8, allocator: std.mem.Allocator) ![]Match {
+        _ = self; // unused
+        var matches = std.ArrayList(Match){};
+
+        @setRuntimeSafety(false);
+
+        // Scan for "://" prefix
+        const prefix = "://";
+        var pos: usize = 0;
+        while (pos < text.len) {
+            const found_pos_opt = std.mem.indexOfPos(u8, text, pos, prefix);
+            const found_pos = found_pos_opt orelse break;
+
+            // Check for http or https before "://"
+            const has_http = found_pos >= 4 and std.mem.eql(u8, text[found_pos - 4 .. found_pos], "http");
+            const has_https = found_pos >= 5 and std.mem.eql(u8, text[found_pos - 5 .. found_pos], "https");
+
+            if (has_http or has_https) {
+                const match_start = if (has_https) found_pos - 5 else found_pos - 4;
+
+                // SIMD: Scan until whitespace (32-byte then 16-byte)
+                const match_end = scanUntilWhitespace(text, found_pos + prefix.len);
+
+                if (match_end > found_pos + prefix.len) {
+                    try matches.append(allocator, .{
+                        .start = match_start,
+                        .end = match_end,
+                    });
+                    pos = match_end;
+                    continue;
+                }
+            }
+
+            pos = found_pos + 1;
         }
 
         return matches.toOwnedSlice(allocator);

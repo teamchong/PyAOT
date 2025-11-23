@@ -41,9 +41,9 @@ fn benchmarkPattern(allocator: std.mem.Allocator, name: []const u8, pattern: []c
 
     // Set prefix hints with pattern-specific tuning (optimal windows)
     if (std.mem.eql(u8, name, "Email")) {
-        dfa.setPrefixWithWindow("@", 1, 1);  // Minimal window
+        dfa.setPrefixWithWindow("@", 1, 4);  // Asymmetric: more after @
     } else if (std.mem.eql(u8, name, "URL")) {
-        dfa.setPrefixWithWindow("://", 6, 10);  // Optimal window
+        dfa.setPrefixWithWindow("://", 5, 0);  // Minimal: just "https" before
         dfa.enableUrlFastPath();  // SIMD fast path for [^\s]+
     } else if (std.mem.eql(u8, name, "Digits")) {
         dfa.enableDigitsFastPath();  // SIMD fast path for [0-9]+

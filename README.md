@@ -349,15 +349,7 @@ Zig's compiler analyzes which functions you **actually call** and only includes 
 | Python (re) | ~43,000ms (est) | 1.00x | ~20x slower | #3 |
 | Go (regexp) | ~58,000ms (est) | ~2.7x slower | ~27x slower | #4 |
 
-**All 10 patterns:**
-
-| Implementation | Total Time | Avg per Pattern |
-|---------------|------------|-----------------|
-| Rust (regex) | 1,717ms | 171.7ms |
-| Python (re) | 9,268ms | 926.8ms |
-| Go (regexp) | 11,252ms | 1,125.2ms |
-
-**Key pattern comparison (1M iterations, C allocator + prefix scanning + inline):**
+**Detailed pattern-by-pattern comparison (1M iterations, C allocator + SIMD + prefix scanning):**
 
 | Pattern | Iterations | PyAOT (ms) | Rust (ms) | PyAOT/iter | Rust/iter | Winner |
 |---------|-----------|-----------|----------|------------|-----------|--------|
