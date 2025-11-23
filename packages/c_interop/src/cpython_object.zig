@@ -55,13 +55,13 @@ pub const PyTypeObject = extern struct {
     tp_itemsize: isize,
 
     // Function pointers (simplified - will expand as needed)
-    tp_dealloc: ?*const fn (*PyObject) callconv(.C) void,
-    tp_repr: ?*const fn (*PyObject) callconv(.C) *PyObject,
-    tp_hash: ?*const fn (*PyObject) callconv(.C) isize,
-    tp_call: ?*const fn (*PyObject, *PyObject, ?*PyObject) callconv(.C) *PyObject,
-    tp_str: ?*const fn (*PyObject) callconv(.C) *PyObject,
-    tp_getattro: ?*const fn (*PyObject, *PyObject) callconv(.C) *PyObject,
-    tp_setattro: ?*const fn (*PyObject, *PyObject, *PyObject) callconv(.C) c_int,
+    tp_dealloc: ?*const fn (*PyObject) callconv(.c) void,
+    tp_repr: ?*const fn (*PyObject) callconv(.c) *PyObject,
+    tp_hash: ?*const fn (*PyObject) callconv(.c) isize,
+    tp_call: ?*const fn (*PyObject, *PyObject, ?*PyObject) callconv(.c) *PyObject,
+    tp_str: ?*const fn (*PyObject) callconv(.c) *PyObject,
+    tp_getattro: ?*const fn (*PyObject, *PyObject) callconv(.c) *PyObject,
+    tp_setattro: ?*const fn (*PyObject, *PyObject, *PyObject) callconv(.c) c_int,
 
     // TODO: Add remaining ~43 slots as needed
     // Dead code elimination ensures unused slots don't bloat binary
@@ -124,19 +124,20 @@ pub const PyDictObject = extern struct {
 /// BRIDGE TO OUR INTERNAL TYPES
 /// ============================================================================
 
-const runtime = @import("../../runtime/src/runtime.zig");
+// Note: Runtime import is optional - only needed when bridging is used
+// This keeps the module testable in isolation
 
 /// Convert CPython PyObject to our internal PyObject
-pub fn fromCPython(cpython_obj: *PyObject) !*runtime.PyObject {
-    // TODO: Implement conversion
+pub fn fromCPython(cpython_obj: *PyObject) !*anyopaque {
+    // TODO: Implement conversion with runtime.PyObject
     // For now, just validate it's not null
     _ = cpython_obj;
     return error.NotImplemented;
 }
 
 /// Convert our internal PyObject to CPython PyObject
-pub fn toCPython(our_obj: *runtime.PyObject) !*PyObject {
-    // TODO: Implement conversion
+pub fn toCPython(our_obj: *anyopaque) !*PyObject {
+    // TODO: Implement conversion with runtime.PyObject
     _ = our_obj;
     return error.NotImplemented;
 }
@@ -160,17 +161,17 @@ pub inline fn Py_SIZE(op: *PyVarObject) isize {
     return op.ob_size;
 }
 
-/// ============================================================================
-/// DEAD CODE ELIMINATION SUPPORT
-/// ============================================================================
-
-/// All functions are marked inline or use callconv(.C) export
-/// Zig's dead code elimination will:
-/// 1. Only compile types that are actually used
-/// 2. Only include function pointer slots that are referenced
-/// 3. Strip unused conversion functions
-///
-/// Example: If user code never uses PyDict, PyDictObject won't be in binary!
+// ============================================================================
+// DEAD CODE ELIMINATION SUPPORT
+// ============================================================================
+//
+// All functions are marked inline or use callconv(.c) export
+// Zig's dead code elimination will:
+// 1. Only compile types that are actually used
+// 2. Only include function pointer slots that are referenced
+// 3. Strip unused conversion functions
+//
+// Example: If user code never uses PyDict, PyDictObject won't be in binary!
 
 // Tests
 test "PyObject layout matches CPython" {

@@ -17,7 +17,7 @@ const cpython = @import("cpython_object.zig");
 /// Increment reference count of object
 ///
 /// CPython: void Py_INCREF(PyObject *op)
-export fn Py_INCREF(op: *anyopaque) callconv(.C) void {
+export fn Py_INCREF(op: *anyopaque) callconv(.c) void {
     const obj = @as(*cpython.PyObject, @ptrCast(@alignCast(op)));
     obj.ob_refcnt += 1;
 }
@@ -25,7 +25,7 @@ export fn Py_INCREF(op: *anyopaque) callconv(.C) void {
 /// Decrement reference count, destroy object if reaches zero
 ///
 /// CPython: void Py_DECREF(PyObject *op)
-export fn Py_DECREF(op: *anyopaque) callconv(.C) void {
+export fn Py_DECREF(op: *anyopaque) callconv(.c) void {
     const obj = @as(*cpython.PyObject, @ptrCast(@alignCast(op)));
     obj.ob_refcnt -= 1;
 
@@ -41,7 +41,7 @@ export fn Py_DECREF(op: *anyopaque) callconv(.C) void {
 /// Null-safe increment reference count
 ///
 /// CPython: void Py_XINCREF(PyObject *op)
-export fn Py_XINCREF(op: ?*anyopaque) callconv(.C) void {
+export fn Py_XINCREF(op: ?*anyopaque) callconv(.c) void {
     if (op) |obj_ptr| {
         Py_INCREF(obj_ptr);
     }
@@ -50,7 +50,7 @@ export fn Py_XINCREF(op: ?*anyopaque) callconv(.C) void {
 /// Null-safe decrement reference count
 ///
 /// CPython: void Py_XDECREF(PyObject *op)
-export fn Py_XDECREF(op: ?*anyopaque) callconv(.C) void {
+export fn Py_XDECREF(op: ?*anyopaque) callconv(.c) void {
     if (op) |obj_ptr| {
         Py_DECREF(obj_ptr);
     }
@@ -64,7 +64,7 @@ export fn Py_XDECREF(op: ?*anyopaque) callconv(.C) void {
 ///
 /// CPython: void* PyMem_Malloc(size_t size)
 /// Returns: Pointer to allocated memory or null on failure
-export fn PyMem_Malloc(size: usize) callconv(.C) ?*anyopaque {
+export fn PyMem_Malloc(size: usize) callconv(.c) ?*anyopaque {
     if (size == 0) return null;
 
     const ptr = std.heap.c_allocator.alloc(u8, size) catch return null;
@@ -75,7 +75,7 @@ export fn PyMem_Malloc(size: usize) callconv(.C) ?*anyopaque {
 ///
 /// CPython: void* PyMem_Calloc(size_t nelem, size_t elsize)
 /// Returns: Pointer to zeroed memory or null on failure
-export fn PyMem_Calloc(nelem: usize, elsize: usize) callconv(.C) ?*anyopaque {
+export fn PyMem_Calloc(nelem: usize, elsize: usize) callconv(.c) ?*anyopaque {
     // Check for overflow
     const total_size = std.math.mul(usize, nelem, elsize) catch return null;
     if (total_size == 0) return null;
@@ -89,7 +89,7 @@ export fn PyMem_Calloc(nelem: usize, elsize: usize) callconv(.C) ?*anyopaque {
 ///
 /// CPython: void* PyMem_Realloc(void *ptr, size_t size)
 /// Returns: Pointer to resized memory or null on failure
-export fn PyMem_Realloc(ptr: ?*anyopaque, new_size: usize) callconv(.C) ?*anyopaque {
+export fn PyMem_Realloc(ptr: ?*anyopaque, new_size: usize) callconv(.c) ?*anyopaque {
     // If ptr is null, equivalent to malloc
     if (ptr == null) {
         return PyMem_Malloc(new_size);
@@ -119,7 +119,7 @@ export fn PyMem_Realloc(ptr: ?*anyopaque, new_size: usize) callconv(.C) ?*anyopa
 /// Free memory block
 ///
 /// CPython: void PyMem_Free(void *ptr)
-export fn PyMem_Free(ptr: ?*anyopaque) callconv(.C) void {
+export fn PyMem_Free(ptr: ?*anyopaque) callconv(.c) void {
     if (ptr) |p| {
         // Cannot free without knowing size in Zig
         // This is a limitation - we need a tracking allocator
@@ -140,7 +140,7 @@ export fn PyMem_Free(ptr: ?*anyopaque) callconv(.C) void {
 ///
 /// CPython uses "pymalloc" arena allocator for small objects (<= 512 bytes)
 /// For now, we delegate to PyMem_Malloc (can optimize later)
-export fn PyObject_Malloc(size: usize) callconv(.C) ?*anyopaque {
+export fn PyObject_Malloc(size: usize) callconv(.c) ?*anyopaque {
     // TODO: Implement small object pool optimization
     // CPython uses 512-byte threshold
     return PyMem_Malloc(size);
@@ -149,7 +149,7 @@ export fn PyObject_Malloc(size: usize) callconv(.C) ?*anyopaque {
 /// Free object memory
 ///
 /// CPython: void PyObject_Free(void *ptr)
-export fn PyObject_Free(ptr: ?*anyopaque) callconv(.C) void {
+export fn PyObject_Free(ptr: ?*anyopaque) callconv(.c) void {
     // TODO: Return to object pool if from PyObject_Malloc
     PyMem_Free(ptr);
 }
@@ -234,7 +234,7 @@ test "reference counting - destruction at zero" {
     const Destructor = struct {
         var called: bool = false;
 
-        fn dealloc(op: *cpython.PyObject) callconv(.C) void {
+        fn dealloc(op: *cpython.PyObject) callconv(.c) void {
             _ = op;
             called = true;
         }
@@ -354,7 +354,7 @@ test "reference counting lifecycle" {
     const Tracker = struct {
         var destroyed: bool = false;
 
-        fn dealloc(op: *cpython.PyObject) callconv(.C) void {
+        fn dealloc(op: *cpython.PyObject) callconv(.c) void {
             _ = op;
             destroyed = true;
         }
