@@ -105,8 +105,10 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
         try args.append(aa, lib_flag);
     }
 
-    // Add BLAS linking for NumPy support (fallback if not in c_libraries)
+    // Add BLAS linking ONLY if explicitly needed (c_libraries non-empty)
+    // This avoids unnecessary Accelerate framework loading (~1.2ms startup overhead)
     const builtin = @import("builtin");
+    const needs_blas = c_libraries.len > 0;
     const has_blas = blk: {
         for (c_libraries) |lib| {
             if (std.mem.eql(u8, lib, "openblas") or std.mem.eql(u8, lib, "blas")) {
@@ -116,7 +118,7 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
         break :blk false;
     };
 
-    if (!has_blas) {
+    if (needs_blas and !has_blas) {
         if (builtin.os.tag == .macos) {
             // macOS: Use Accelerate framework (built-in BLAS)
             try args.append(aa, "-framework");
@@ -259,8 +261,10 @@ pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, o
         try args.append(allocator, lib_flag);
     }
 
-    // Add BLAS linking for NumPy support (fallback if not in c_libraries)
+    // Add BLAS linking ONLY if explicitly needed (c_libraries non-empty)
+    // This avoids unnecessary Accelerate framework loading (~1.2ms startup overhead)
     const builtin = @import("builtin");
+    const needs_blas = c_libraries.len > 0;
     const has_blas = blk: {
         for (c_libraries) |lib| {
             if (std.mem.eql(u8, lib, "openblas") or std.mem.eql(u8, lib, "blas")) {
@@ -270,7 +274,7 @@ pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, o
         break :blk false;
     };
 
-    if (!has_blas) {
+    if (needs_blas and !has_blas) {
         if (builtin.os.tag == .macos) {
             // macOS: Use Accelerate framework (built-in BLAS)
             try args.append(allocator, "-framework");
