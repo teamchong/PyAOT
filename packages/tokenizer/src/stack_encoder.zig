@@ -4,20 +4,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const AhoCorasick = @import("aho_corasick.zig").AhoCorasick;
 const FnvHashContext = @import("fnv_hash.zig").FnvHashContext;
-
-// Re-export types from backtrack_encoder for compatibility
-pub const Pair = struct {
-    left: u32,
-    right: u32,
-
-    pub fn hash(self: Pair) u64 {
-        return (@as(u64, self.left) << 32) | self.right;
-    }
-
-    pub fn eql(a: Pair, b: Pair) bool {
-        return a.left == b.left and a.right == b.right;
-    }
-};
+const helpers = @import("tokenizer_helpers.zig");
+const Pair = helpers.Pair;
 
 pub const PairContext = struct {
     pub fn hash(_: PairContext, p: Pair) u64 {
@@ -52,7 +40,7 @@ pub fn BacktrackEncoder(comptime max_text_size: usize) type {
         // BPE data (borrowed references - no ownership)
         aho_corasick: *const AhoCorasick,
         vocab_r: *const std.AutoHashMap(u32, []const u8),
-        split_table: *const std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
+        split_table: []const Pair,
         pair_lookup: *const std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
         next_prefix_match: []const u32,
 
@@ -60,7 +48,7 @@ pub fn BacktrackEncoder(comptime max_text_size: usize) type {
             text: []const u8,
             aho_corasick: *const AhoCorasick,
             vocab_r: *const std.AutoHashMap(u32, []const u8),
-            split_table: *const std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
+            split_table: []const Pair,
             pair_lookup: *const std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
             next_prefix_match: []const u32,
         ) !Self {
@@ -187,39 +175,27 @@ pub fn BacktrackEncoder(comptime max_text_size: usize) type {
 
                 if (token1 > token2) {
                     limit = token1;
-                    if (self.split_table.get(token1)) |split| {
-                        token1 = split.right;
-                        if (token1 == limit) {
-                            limit = token2 + 1;
-                            if (self.split_table.get(token2)) |split2| {
-                                token2 = split2.left;
-                                if (token2 + 1 == limit) {
-                                    return true;
-                                }
-                            } else {
-                                return true;
-                            }
+                    const split = self.split_table[token1];
+                    token1 = split.right;
+                    if (token1 == limit) {
+                        limit = token2 + 1;
+                        const split2 = self.split_table[token2];
+                        token2 = split2.left;
+                        if (token2 + 1 == limit) {
+                            return true;
                         }
-                    } else {
-                        return true;
                     }
                 } else {
                     limit = token2 + 1;
-                    if (self.split_table.get(token2)) |split| {
-                        token2 = split.left;
-                        if (token2 + 1 == limit) {
-                            limit = token1;
-                            if (self.split_table.get(token1)) |split2| {
-                                token1 = split2.right;
-                                if (token1 == limit) {
-                                    return true;
-                                }
-                            } else {
-                                return true;
-                            }
+                    const split = self.split_table[token2];
+                    token2 = split.left;
+                    if (token2 + 1 == limit) {
+                        limit = token1;
+                        const split2 = self.split_table[token1];
+                        token1 = split2.right;
+                        if (token1 == limit) {
+                            return true;
                         }
-                    } else {
-                        return true;
                     }
                 }
             }

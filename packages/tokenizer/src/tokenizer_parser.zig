@@ -18,7 +18,7 @@ pub const TokenizerData = struct {
     vocab_r: std.AutoHashMap(u32, []const u8),
     merges: std.ArrayList(Pair),
     merges_map: std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
-    split_table: std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
+    split_table: []Pair,
     pattern_str: []const u8,
     trie: ?*TrieNode,
     aho_corasick: ?AhoCorasick,
@@ -105,12 +105,10 @@ pub fn initFromData(json_data: []const u8, allocator: Allocator) !TokenizerData 
     const merges = std.ArrayList(Pair){};
 
     // Build split_table by reverse-engineering vocab (rs-bpe algorithm)
-    var split_table = std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage).initContext(allocator, FnvHashContext(u32){});
-    errdefer split_table.deinit();
     var merges_map = std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage).initContext(allocator, FnvHashContext(Pair){});
     errdefer merges_map.deinit();
 
-    try builder.buildSplitTable(&vocab_r, &vocab, &split_table, &merges_map, allocator);
+    const split_table = try builder.buildSplitTable(&vocab_r, &vocab, &merges_map, allocator);
 
     const trie: ?*TrieNode = null;
 
@@ -180,9 +178,6 @@ pub fn parseTokenizerJSON(root_value: std.json.Value, allocator: Allocator) !Tok
     ).initContext(allocator, FnvHashContext(Pair){});
     errdefer merges_map.deinit();
 
-    var split_table = std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage).initContext(allocator, FnvHashContext(u32){});
-    errdefer split_table.deinit();
-
     const root = root_value.object;
 
     // Simple format: {"vocab": {"base64_token": rank, ...}}
@@ -209,7 +204,7 @@ pub fn parseTokenizerJSON(root_value: std.json.Value, allocator: Allocator) !Tok
     const trie: ?*TrieNode = null;
 
     // Build split_table for BacktrackEncoder validation
-    try builder.buildSplitTable(&vocab_r, &vocab, &split_table, &merges_map, allocator);
+    const split_table = try builder.buildSplitTable(&vocab_r, &vocab, &merges_map, allocator);
 
     // Build Aho-Corasick automaton for fast vocab lookup
     const aho_corasick = try builder.buildAhoCorasick(&vocab_r, allocator);

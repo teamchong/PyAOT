@@ -247,12 +247,7 @@ pub const Trainer = struct {
         const TrieNode = @import("tokenizer.zig").TrieNode;
         const trie = try TrieNode.init(self.allocator);
 
-        const split_table = std.HashMap(
-            u32,
-            @import("tokenizer.zig").Pair,
-            FnvHashContext(u32),
-            std.hash_map.default_max_load_percentage,
-        ).initContext(self.allocator, FnvHashContext(u32){});
+        const split_table = try self.allocator.alloc(@import("tokenizer.zig").Pair, 0); // Empty for trainer
 
         const next_prefix_match = try self.allocator.alloc(u32, 0); // Empty for trainer
 

@@ -56,7 +56,7 @@ pub const Tokenizer = struct {
     vocab_r: std.AutoHashMap(u32, []const u8),
     merges: std.ArrayList(Pair),
     merges_map: std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
-    split_table: std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage), // For merge validation: token -> (left, right)
+    split_table: []Pair, // For merge validation: token -> (left, right)
     pattern_str: []const u8,
     trie: ?*TrieNode, // Fast longest-match lookup (optional - uses lots of memory)
     aho_corasick: ?AhoCorasick, // Fast vocab lookup for backtracking encoder
@@ -107,7 +107,7 @@ pub const Tokenizer = struct {
         self.vocab_r.deinit();
         self.merges.deinit(self.allocator);
         self.merges_map.deinit();
-        self.split_table.deinit();
+        self.allocator.free(self.split_table);
         self.allocator.free(self.pattern_str);
         if (self.trie) |t| t.deinit();
         if (self.aho_corasick) |*ac| ac.deinit();
@@ -389,7 +389,7 @@ pub const Tokenizer = struct {
                         text,
                         ac,
                         &self.vocab_r,
-                        @ptrCast(&self.split_table),
+                        self.split_table,
                         @ptrCast(&self.merges_map),
                         self.next_prefix_match,
                     );
@@ -400,7 +400,7 @@ pub const Tokenizer = struct {
                         text,
                         ac,
                         &self.vocab_r,
-                        @ptrCast(&self.split_table),
+                        self.split_table,
                         @ptrCast(&self.merges_map),
                         self.next_prefix_match,
                     );
@@ -411,7 +411,7 @@ pub const Tokenizer = struct {
                         text,
                         ac,
                         &self.vocab_r,
-                        @ptrCast(&self.split_table),
+                        self.split_table,
                         @ptrCast(&self.merges_map),
                         self.next_prefix_match,
                     );
@@ -424,7 +424,7 @@ pub const Tokenizer = struct {
                         text,
                         ac,
                         &self.vocab_r,
-                        @ptrCast(&self.split_table),
+                        self.split_table,
                         @ptrCast(&self.merges_map),
                         self.next_prefix_match,
                     );

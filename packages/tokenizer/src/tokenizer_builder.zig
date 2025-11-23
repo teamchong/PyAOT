@@ -11,23 +11,32 @@ const StringHashContext = helpers.StringHashContext;
 const FnvHashContext = @import("fnv_hash.zig").FnvHashContext;
 
 /// Build split_table by reverse-engineering vocab (port of rs-bpe lines 289-320)
+/// Now returns array indexed by token ID for O(1) access
 pub fn buildSplitTable(
     vocab_r: *const std.AutoHashMap(u32, []const u8),
     vocab: anytype,
-    split_table: *std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
     pair_lookup: anytype,
     allocator: Allocator,
-) !void {
+) ![]Pair {
+    // Find max token ID to size array
+    const vocab_size = vocab_r.count();
+
+    // Allocate array
+    const split_table = try allocator.alloc(Pair, vocab_size);
+
+    // Initialize with sentinels (base tokens split to themselves)
+    for (split_table, 0..) |*pair, i| {
+        pair.* = .{ .left = @intCast(i), .right = @intCast(i) };
+    }
+
     // For each token (by rank/id), find the split that created it
     var id: u32 = 0;
-    while (id < vocab_r.count()) : (id += 1) {
+    while (id < vocab_size) : (id += 1) {
         const token_bytes = vocab_r.get(id) orelse {
-            try split_table.put(id, Pair{ .left = id, .right = id });
             continue;
         };
 
         if (token_bytes.len <= 1) {
-            try split_table.put(id, Pair{ .left = id, .right = id });
             continue;
         }
 
@@ -97,7 +106,7 @@ pub fn buildSplitTable(
             if (best_rank == id) {
                 const left = parts.items[best_pos];
                 const right = parts.items[best_pos + 1];
-                try split_table.put(id, Pair{ .left = left, .right = right });
+                split_table[id] = Pair{ .left = left, .right = right };
                 try pair_lookup.put(Pair{ .left = left, .right = right }, id);
                 break;
             }
@@ -106,12 +115,9 @@ pub fn buildSplitTable(
             parts.items[best_pos] = best_new_token;
             _ = parts.orderedRemove(best_pos + 1);
         }
-
-        // If loop finished without finding split (e.g. base token or error), map to self
-        if (!split_table.contains(id)) {
-            try split_table.put(id, Pair{ .left = id, .right = id });
-        }
     }
+
+    return split_table;
 }
 
 /// Build Aho-Corasick automaton from vocab for fast longest-match lookup
@@ -162,7 +168,7 @@ pub fn buildNextPrefixMatch(
 /// Port of rs-bpe's is_valid_token_pair (lines 112-148)
 pub fn isValidTokenPair(
     pair_lookup: anytype,
-    split_table: *const std.AutoHashMap(u32, Pair),
+    split_table: []const Pair,
     token1_arg: u32,
     token2_arg: u32,
 ) bool {
@@ -181,39 +187,27 @@ pub fn isValidTokenPair(
 
         if (token1 > token2) {
             limit = token1;
-            if (split_table.get(token1)) |split| {
-                token1 = split.right;
-                if (token1 == limit) {
-                    limit = token2 + 1;
-                    if (split_table.get(token2)) |split2| {
-                        token2 = split2.left;
-                        if (token2 + 1 == limit) {
-                            return true;
-                        }
-                    } else {
-                        return true;
-                    }
+            const split = split_table[token1];
+            token1 = split.right;
+            if (token1 == limit) {
+                limit = token2 + 1;
+                const split2 = split_table[token2];
+                token2 = split2.left;
+                if (token2 + 1 == limit) {
+                    return true;
                 }
-            } else {
-                return true;
             }
         } else {
             limit = token2 + 1;
-            if (split_table.get(token2)) |split| {
-                token2 = split.left;
-                if (token2 + 1 == limit) {
-                    limit = token1;
-                    if (split_table.get(token1)) |split2| {
-                        token1 = split2.right;
-                        if (token1 == limit) {
-                            return true;
-                        }
-                    } else {
-                        return true;
-                    }
+            const split = split_table[token2];
+            token2 = split.left;
+            if (token2 + 1 == limit) {
+                limit = token1;
+                const split2 = split_table[token1];
+                token1 = split2.right;
+                if (token1 == limit) {
+                    return true;
                 }
-            } else {
-                return true;
             }
         }
     }
