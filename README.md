@@ -190,13 +190,13 @@ All benchmarks run with [hyperfine](https://github.com/sharkdp/hyperfine) on App
 
 **BPE Training (583 texts × vocab 32000 × 30 runs):**
 
-| Library | Time | vs PyAOT | Correctness |
-|---------|------|----------|-------------|
-| **PyAOT (Zig)** | **28.3ms** | **1.00x** | ⚠️ TBC |
-| SentencePiece (C++) | 335.8ms | 11.86x slower | ✅ |
-| HuggingFace (Rust) | 2.722s | 96.09x slower | ✅ |
+| Library | Time | Correctness |
+|---------|------|-------------|
+| SentencePiece (C++) | 335.8ms | ✅ |
+| HuggingFace (Rust) | 2.722s | ✅ |
+| **PyAOT (Zig)** | **⚠️ TBC** | **⚠️ TBC** |
 
-**⚠️ Training correctness verification in progress** - performance measured, but output format not yet verified against reference implementation.
+**⚠️ Training verification in progress** - needs `saveToFile()` implementation to verify correctness before claiming performance.
 
 **Key Highlights:**
 - ✅ **5 libraries tested** for encoding (rs-bpe, tiktoken, TokenDagger, HuggingFace, PyAOT)
