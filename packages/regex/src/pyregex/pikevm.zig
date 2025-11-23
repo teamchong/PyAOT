@@ -11,6 +11,23 @@ const MATCH_STATE = nfa.MATCH_STATE;
 /// Maximum number of capturing groups supported
 pub const MAX_CAPTURES = 32;
 
+/// Check if a character is a word character: [a-zA-Z0-9_]
+fn isWordChar(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or
+           (c >= 'A' and c <= 'Z') or
+           (c >= '0' and c <= '9') or
+           c == '_';
+}
+
+/// Check if position is at a word boundary
+fn isAtWordBoundary(text: []const u8, pos: usize) bool {
+    const before_is_word = if (pos == 0) false else isWordChar(text[pos - 1]);
+    const after_is_word = if (pos >= text.len) false else isWordChar(text[pos]);
+
+    // Boundary if one side is word char and other isn't
+    return before_is_word != after_is_word;
+}
+
 /// Span representing a captured substring
 pub const Span = struct {
     start: usize,
@@ -178,8 +195,8 @@ pub const PikeVM = struct {
             for (current.threads.items) |thread| {
                 if (thread.state == MATCH_STATE) {
                     // Found a match at this position
-                    // Keep it if it's longer than current best (greedy)
-                    if (pos > best_pos) {
+                    // Keep it if it's the first match OR longer than current best (greedy)
+                    if (best_match == null or pos > best_pos) {
                         // Free old match if any
                         if (best_match) |*old| {
                             old.deinit(self.allocator);
@@ -244,11 +261,11 @@ pub const PikeVM = struct {
 
         const state = &self.nfa.states[thread.state];
 
-        // Check if this is an epsilon state (split or epsilon transitions)
+        // Check if this is an epsilon state (split, epsilon, or assertion transitions)
         var has_epsilon = false;
         for (state.transitions) |trans| {
             switch (trans) {
-                .epsilon, .split => {
+                .epsilon, .split, .start_assert, .end_assert, .word_boundary, .not_word_boundary => {
                     has_epsilon = true;
                     break;
                 },
@@ -268,6 +285,38 @@ pub const PikeVM = struct {
                     .split => |s| {
                         // Try all branches
                         for (s.targets) |target| {
+                            var new_thread = thread.clone();
+                            new_thread.state = target;
+                            try self.addThread(list, new_thread, text, pos);
+                        }
+                    },
+                    .start_assert => |target| {
+                        // ^ matches only at text start
+                        if (pos == 0) {
+                            var new_thread = thread.clone();
+                            new_thread.state = target;
+                            try self.addThread(list, new_thread, text, pos);
+                        }
+                    },
+                    .end_assert => |target| {
+                        // $ matches only at text end
+                        if (pos == text.len) {
+                            var new_thread = thread.clone();
+                            new_thread.state = target;
+                            try self.addThread(list, new_thread, text, pos);
+                        }
+                    },
+                    .word_boundary => |target| {
+                        // \b matches at word boundary
+                        if (isAtWordBoundary(text, pos)) {
+                            var new_thread = thread.clone();
+                            new_thread.state = target;
+                            try self.addThread(list, new_thread, text, pos);
+                        }
+                    },
+                    .not_word_boundary => |target| {
+                        // \B matches NOT at word boundary
+                        if (!isAtWordBoundary(text, pos)) {
                             var new_thread = thread.clone();
                             new_thread.state = target;
                             try self.addThread(list, new_thread, text, pos);

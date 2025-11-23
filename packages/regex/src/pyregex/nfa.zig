@@ -39,6 +39,18 @@ pub const Transition = union(enum) {
         targets: []StateId,
     },
 
+    /// Start assertion (^) - matches only at text start
+    start_assert: StateId,
+
+    /// End assertion ($) - matches only at text end
+    end_assert: StateId,
+
+    /// Word boundary assertion (\b) - matches at word boundary
+    word_boundary: StateId,
+
+    /// Not word boundary assertion (\B) - matches NOT at word boundary
+    not_word_boundary: StateId,
+
     /// Match state - accept the input
     match: void,
 };
@@ -215,6 +227,26 @@ pub const Builder = struct {
                             }
                         }
                     },
+                    .start_assert => |*t| {
+                        if (t.* == DANGLING) {
+                            t.* = target;
+                        }
+                    },
+                    .end_assert => |*t| {
+                        if (t.* == DANGLING) {
+                            t.* = target;
+                        }
+                    },
+                    .word_boundary => |*t| {
+                        if (t.* == DANGLING) {
+                            t.* = target;
+                        }
+                    },
+                    .not_word_boundary => |*t| {
+                        if (t.* == DANGLING) {
+                            t.* = target;
+                        }
+                    },
                     .match => {},
                 }
             }
@@ -289,9 +321,25 @@ pub const Builder = struct {
     }
 
     /// Compile \s (whitespace)
+    /// Matches: space, tab, newline, carriage return, form feed, vertical tab
     fn compileWhitespace(self: *Builder) !Fragment {
-        // TODO: Implement properly (space, tab, newline, etc.)
-        return try self.compileAny();
+        var out_states: std.ArrayList(StateId) = .{};
+
+        // Python \s matches: [ \t\n\r\f\v]
+        const whitespace_chars = [_]u8{ ' ', '\t', '\n', '\r', 12, 11 }; // 12=\f, 11=\v
+
+        const trans = try self.allocator.alloc(Transition, whitespace_chars.len);
+        for (whitespace_chars, 0..) |ch, i| {
+            trans[i] = Transition{ .byte = .{ .value = ch, .target = DANGLING } };
+        }
+
+        const state_id = try self.newState(trans);
+        try out_states.append(self.allocator, state_id);
+
+        return Fragment{
+            .start = state_id,
+            .out_states = out_states,
+        };
     }
 
     /// Compile \S (not whitespace)
@@ -302,9 +350,68 @@ pub const Builder = struct {
 
     /// Compile character class: [abc] or [a-z]
     fn compileClass(self: *Builder, class: Expr.CharClass) !Fragment {
-        _ = class;
-        // TODO: Implement properly
-        return try self.compileAny();
+        var out_states: std.ArrayList(StateId) = .{};
+
+        if (class.negated) {
+            // Negated class [^abc] - match anything EXCEPT these characters
+            // For now, implement as: match any byte that's NOT in the ranges
+            // This requires checking all ranges during matching
+
+            // Create transitions for all possible bytes NOT in the ranges
+            // This is inefficient but correct - optimization later
+            var allowed_bytes: std.ArrayList(u8) = .{};
+
+            for (0..256) |byte_val| {
+                const byte: u8 = @intCast(byte_val);
+                var in_range = false;
+
+                for (class.ranges) |range| {
+                    if (byte >= range.start and byte <= range.end) {
+                        in_range = true;
+                        break;
+                    }
+                }
+
+                if (!in_range) {
+                    try allowed_bytes.append(self.allocator, byte);
+                }
+            }
+
+            const trans = try self.allocator.alloc(Transition, allowed_bytes.items.len);
+            for (allowed_bytes.items, 0..) |byte, i| {
+                trans[i] = Transition{ .byte = .{ .value = byte, .target = DANGLING } };
+            }
+            allowed_bytes.deinit(self.allocator);
+
+            const state_id = try self.newState(trans);
+            try out_states.append(self.allocator, state_id);
+
+            return Fragment{
+                .start = state_id,
+                .out_states = out_states,
+            };
+        } else {
+            // Positive class [abc] or [a-z] - match any character in the ranges
+            const trans = try self.allocator.alloc(Transition, class.ranges.len);
+
+            for (class.ranges, 0..) |range, i| {
+                if (range.start == range.end) {
+                    // Single character
+                    trans[i] = Transition{ .byte = .{ .value = range.start, .target = DANGLING } };
+                } else {
+                    // Character range
+                    trans[i] = Transition{ .range = .{ .start = range.start, .end = range.end, .target = DANGLING } };
+                }
+            }
+
+            const state_id = try self.newState(trans);
+            try out_states.append(self.allocator, state_id);
+
+            return Fragment{
+                .start = state_id,
+                .out_states = out_states,
+            };
+        }
     }
 
     /// Compile e* (zero or more)
@@ -395,9 +502,69 @@ pub const Builder = struct {
 
     /// Compile e{n,m} (repeat)
     fn compileRepeat(self: *Builder, repeat: Expr.Repeat) !Fragment {
-        _ = repeat;
-        // TODO: Implement
-        return try self.compileAny();
+        // Strategy: Expand repeat to concat of copies
+        // e{3} = eee
+        // e{2,5} = ee(e)?(e)?(e)?  (2 required + 3 optional)
+        // e{2,} = ee(e)*  (2 required + star)
+
+        if (repeat.min == 0 and repeat.max == null) {
+            // {0,} is same as *
+            return try self.compileStar(repeat.expr.*);
+        }
+
+        if (repeat.min == 0 and repeat.max != null and repeat.max.? == 1) {
+            // {0,1} is same as ?
+            return try self.compileQuestion(repeat.expr.*);
+        }
+
+        // Build fragments array
+        var fragments: std.ArrayList(Fragment) = .{};
+        errdefer {
+            for (fragments.items) |*frag| {
+                frag.out_states.deinit(self.allocator);
+            }
+            fragments.deinit(self.allocator);
+        }
+
+        // Add minimum required copies
+        for (0..repeat.min) |_| {
+            const frag = try self.compile(repeat.expr.*);
+            try fragments.append(self.allocator, frag);
+        }
+
+        // Add optional copies if bounded
+        if (repeat.max) |max| {
+            if (max > repeat.min) {
+                // Add (max - min) optional copies (each wrapped in ?)
+                for (repeat.min..max) |_| {
+                    const frag = try self.compileQuestion(repeat.expr.*);
+                    try fragments.append(self.allocator, frag);
+                }
+            }
+        } else {
+            // Unbounded: add one * copy
+            const frag = try self.compileStar(repeat.expr.*);
+            try fragments.append(self.allocator, frag);
+        }
+
+        // If only one fragment, return it
+        if (fragments.items.len == 1) {
+            const result = fragments.items[0];
+            fragments.deinit(self.allocator);
+            return result;
+        }
+
+        // Concatenate all fragments
+        var result = fragments.items[0];
+        for (fragments.items[1..]) |frag| {
+            // Connect result's out to frag's start
+            try self.patch(result.out_states, frag.start);
+            result.out_states.deinit(self.allocator);
+            result.out_states = frag.out_states;
+        }
+
+        fragments.deinit(self.allocator);
+        return result;
     }
 
     /// Compile e1 e2 e3 (concatenation)
@@ -481,26 +648,66 @@ pub const Builder = struct {
 
     /// Compile ^ (start anchor)
     fn compileStart(self: *Builder) !Fragment {
-        // TODO: Implement properly
-        return try self.compileAny();
+        var out_states: std.ArrayList(StateId) = .{};
+
+        const trans = try self.allocator.alloc(Transition, 1);
+        trans[0] = Transition{ .start_assert = DANGLING };
+
+        const state_id = try self.newState(trans);
+        try out_states.append(self.allocator, state_id);
+
+        return Fragment{
+            .start = state_id,
+            .out_states = out_states,
+        };
     }
 
     /// Compile $ (end anchor)
     fn compileEnd(self: *Builder) !Fragment {
-        // TODO: Implement properly
-        return try self.compileAny();
+        var out_states: std.ArrayList(StateId) = .{};
+
+        const trans = try self.allocator.alloc(Transition, 1);
+        trans[0] = Transition{ .end_assert = DANGLING };
+
+        const state_id = try self.newState(trans);
+        try out_states.append(self.allocator, state_id);
+
+        return Fragment{
+            .start = state_id,
+            .out_states = out_states,
+        };
     }
 
     /// Compile \b (word boundary)
     fn compileWordBoundary(self: *Builder) !Fragment {
-        // TODO: Implement properly
-        return try self.compileAny();
+        var out_states: std.ArrayList(StateId) = .{};
+
+        const trans = try self.allocator.alloc(Transition, 1);
+        trans[0] = Transition{ .word_boundary = DANGLING };
+
+        const state_id = try self.newState(trans);
+        try out_states.append(self.allocator, state_id);
+
+        return Fragment{
+            .start = state_id,
+            .out_states = out_states,
+        };
     }
 
     /// Compile \B (not word boundary)
     fn compileNotWordBoundary(self: *Builder) !Fragment {
-        // TODO: Implement properly
-        return try self.compileAny();
+        var out_states: std.ArrayList(StateId) = .{};
+
+        const trans = try self.allocator.alloc(Transition, 1);
+        trans[0] = Transition{ .not_word_boundary = DANGLING };
+
+        const state_id = try self.newState(trans);
+        try out_states.append(self.allocator, state_id);
+
+        return Fragment{
+            .start = state_id,
+            .out_states = out_states,
+        };
     }
 };
 
