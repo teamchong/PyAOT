@@ -10,14 +10,15 @@ const StringHashContext = helpers.StringHashContext;
 const TrieNode = helpers.TrieNode;
 const builder = @import("tokenizer_builder.zig");
 const AhoCorasick = @import("aho_corasick.zig").AhoCorasick;
+const FnvHashContext = @import("fnv_hash.zig").FnvHashContext;
 
 /// Tokenizer structure (forward declaration for parser)
 pub const TokenizerData = struct {
-    vocab: std.StringHashMap(u32),
+    vocab: std.HashMap([]const u8, u32, FnvHashContext([]const u8), std.hash_map.default_max_load_percentage),
     vocab_r: std.AutoHashMap(u32, []const u8),
     merges: std.ArrayList(Pair),
-    merges_map: std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
-    split_table: std.AutoHashMap(u32, Pair),
+    merges_map: std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
+    split_table: std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
     pattern_str: []const u8,
     trie: ?*TrieNode,
     aho_corasick: ?AhoCorasick,
@@ -28,7 +29,7 @@ pub const TokenizerData = struct {
 /// Parse tokenizer from raw JSON data (manual parser for WASM/freestanding)
 pub fn initFromData(json_data: []const u8, allocator: Allocator) !TokenizerData {
     // Manual JSON parser (std.json doesn't work in WASM freestanding)
-    var vocab = std.StringHashMap(u32).init(allocator);
+    var vocab = std.HashMap([]const u8, u32, FnvHashContext([]const u8), std.hash_map.default_max_load_percentage).initContext(allocator, FnvHashContext([]const u8){});
     errdefer vocab.deinit();
 
     var vocab_r = std.AutoHashMap(u32, []const u8).init(allocator);
@@ -104,9 +105,9 @@ pub fn initFromData(json_data: []const u8, allocator: Allocator) !TokenizerData 
     const merges = std.ArrayList(Pair){};
 
     // Build split_table by reverse-engineering vocab (rs-bpe algorithm)
-    var split_table = std.AutoHashMap(u32, Pair).init(allocator);
+    var split_table = std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage).initContext(allocator, FnvHashContext(u32){});
     errdefer split_table.deinit();
-    var merges_map = std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage).initContext(allocator, PairContext{});
+    var merges_map = std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage).initContext(allocator, FnvHashContext(Pair){});
     errdefer merges_map.deinit();
 
     try builder.buildSplitTable(&vocab_r, &vocab, &split_table, &merges_map, allocator);
@@ -162,7 +163,7 @@ pub fn initFromFile(tokenizer_path: []const u8, allocator: Allocator) !Tokenizer
 
 /// Parse tokenizer from std.json.Value
 pub fn parseTokenizerJSON(root_value: std.json.Value, allocator: Allocator) !TokenizerData {
-    var vocab = std.StringHashMap(u32).init(allocator);
+    var vocab = std.HashMap([]const u8, u32, FnvHashContext([]const u8), std.hash_map.default_max_load_percentage).initContext(allocator, FnvHashContext([]const u8){});
     errdefer vocab.deinit();
 
     var vocab_r = std.AutoHashMap(u32, []const u8).init(allocator);
@@ -174,12 +175,12 @@ pub fn parseTokenizerJSON(root_value: std.json.Value, allocator: Allocator) !Tok
     var merges_map = std.HashMap(
         Pair,
         u32,
-        PairContext,
+        FnvHashContext(Pair),
         std.hash_map.default_max_load_percentage,
-    ).initContext(allocator, PairContext{});
+    ).initContext(allocator, FnvHashContext(Pair){});
     errdefer merges_map.deinit();
 
-    var split_table = std.AutoHashMap(u32, Pair).init(allocator);
+    var split_table = std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage).initContext(allocator, FnvHashContext(u32){});
     errdefer split_table.deinit();
 
     const root = root_value.object;

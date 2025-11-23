@@ -3,6 +3,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const AhoCorasick = @import("aho_corasick.zig").AhoCorasick;
+const FnvHashContext = @import("fnv_hash.zig").FnvHashContext;
 
 // Re-export types from backtrack_encoder for compatibility
 pub const Pair = struct {
@@ -51,16 +52,16 @@ pub fn BacktrackEncoder(comptime max_text_size: usize) type {
         // BPE data (borrowed references - no ownership)
         aho_corasick: *const AhoCorasick,
         vocab_r: *const std.AutoHashMap(u32, []const u8),
-        split_table: *const std.AutoHashMap(u32, Pair),
-        pair_lookup: *const std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
+        split_table: *const std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
+        pair_lookup: *const std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
         next_prefix_match: []const u32,
 
         pub fn init(
             text: []const u8,
             aho_corasick: *const AhoCorasick,
             vocab_r: *const std.AutoHashMap(u32, []const u8),
-            split_table: *const std.AutoHashMap(u32, Pair),
-            pair_lookup: *const std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
+            split_table: *const std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
+            pair_lookup: *const std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
             next_prefix_match: []const u32,
         ) !Self {
             if (text.len > max_text_size) return error.TextTooLarge;

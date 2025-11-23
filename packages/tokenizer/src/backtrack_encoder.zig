@@ -4,6 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const AhoCorasick = @import("aho_corasick.zig").AhoCorasick;
 const pool_mod = @import("pool.zig");
+const FnvHashContext = @import("fnv_hash.zig").FnvHashContext;
 
 // MUST match tokenizer.Pair exactly
 pub const Pair = struct {
@@ -43,8 +44,8 @@ pub const BacktrackEncoder = struct {
     // BPE data
     aho_corasick: *const AhoCorasick,
     vocab_r: *const std.AutoHashMap(u32, []const u8),
-    split_table: *const std.AutoHashMap(u32, Pair),
-    pair_lookup: *const std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
+    split_table: *const std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
+    pair_lookup: *const std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
     next_prefix_match: []const u32, // Precomputed prefix table
 
     /// Port of rs-bpe::new() with arena allocator for temporary allocations
@@ -56,8 +57,8 @@ pub const BacktrackEncoder = struct {
         text: []const u8,
         aho_corasick: *const AhoCorasick,
         vocab_r: *const std.AutoHashMap(u32, []const u8),
-        split_table: *const std.AutoHashMap(u32, Pair),
-        pair_lookup: *const std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
+        split_table: *const std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
+        pair_lookup: *const std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
         next_prefix_match: []const u32,
     ) !BacktrackEncoder {
         var tokens = std.ArrayList(u32){};
@@ -103,8 +104,8 @@ pub const BacktrackEncoder = struct {
         text: []const u8,
         aho_corasick: *const AhoCorasick,
         vocab_r: *const std.AutoHashMap(u32, []const u8),
-        split_table: *const std.AutoHashMap(u32, Pair),
-        pair_lookup: *const std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
+        split_table: *const std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
+        pair_lookup: *const std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
         next_prefix_match: []const u32,
     ) !BacktrackEncoder {
         var tokens = std.ArrayList(u32){};
@@ -226,8 +227,8 @@ pub const BacktrackEncoder = struct {
 
 /// EXACT PORT of rs-bpe is_valid_token_pair (from byte_pair_encoding.rs lines 112-148)
 fn isValidTokenPairImpl(
-    pair_lookup: *const std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
-    split_table: *const std.AutoHashMap(u32, Pair),
+    pair_lookup: *const std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
+    split_table: *const std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
     token1_arg: u32,
     token2_arg: u32,
 ) bool {

@@ -8,13 +8,14 @@ const helpers = @import("tokenizer_helpers.zig");
 const Pair = helpers.Pair;
 const PairContext = helpers.PairContext;
 const StringHashContext = helpers.StringHashContext;
+const FnvHashContext = @import("fnv_hash.zig").FnvHashContext;
 
 /// Build split_table by reverse-engineering vocab (port of rs-bpe lines 289-320)
 pub fn buildSplitTable(
     vocab_r: *const std.AutoHashMap(u32, []const u8),
-    vocab: *const std.StringHashMap(u32),
-    split_table: *std.AutoHashMap(u32, Pair),
-    pair_lookup: *std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
+    vocab: anytype,
+    split_table: *std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage),
+    pair_lookup: anytype,
     allocator: Allocator,
 ) !void {
     // For each token (by rank/id), find the split that created it
@@ -160,7 +161,7 @@ pub fn buildNextPrefixMatch(
 
 /// Port of rs-bpe's is_valid_token_pair (lines 112-148)
 pub fn isValidTokenPair(
-    pair_lookup: *const std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
+    pair_lookup: anytype,
     split_table: *const std.AutoHashMap(u32, Pair),
     token1_arg: u32,
     token2_arg: u32,

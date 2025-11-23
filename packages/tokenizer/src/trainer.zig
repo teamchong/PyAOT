@@ -9,6 +9,7 @@ const Pair = @import("tokenizer.zig").Pair;
 const PairContext = @import("tokenizer.zig").PairContext;
 const StringHashContext = @import("tokenizer.zig").StringHashContext;
 const countPairsSIMD = @import("tokenizer.zig").countPairsSIMD;
+const FnvHashContext = @import("fnv_hash.zig").FnvHashContext;
 
 // Import helper structures and functions from trainer_stats.zig
 const trainer_stats = @import("trainer_stats.zig");
@@ -199,14 +200,19 @@ pub const Trainer = struct {
 
     /// Build tokenizer from learned merges
     fn buildTokenizer(self: *Trainer, merges: std.ArrayList(Pair)) !Tokenizer {
-        var vocab = std.StringHashMap(u32).init(self.allocator);
+        var vocab = std.HashMap(
+            []const u8,
+            u32,
+            FnvHashContext([]const u8),
+            std.hash_map.default_max_load_percentage,
+        ).initContext(self.allocator, FnvHashContext([]const u8){});
         var vocab_r = std.AutoHashMap(u32, []const u8).init(self.allocator);
         var merges_map = std.HashMap(
             Pair,
             u32,
-            PairContext,
+            FnvHashContext(Pair),
             std.hash_map.default_max_load_percentage,
-        ).initContext(self.allocator, PairContext{});
+        ).initContext(self.allocator, FnvHashContext(Pair){});
 
         // Add base vocabulary (256 bytes)
         var i: u32 = 0;
@@ -241,7 +247,12 @@ pub const Trainer = struct {
         const TrieNode = @import("tokenizer.zig").TrieNode;
         const trie = try TrieNode.init(self.allocator);
 
-        const split_table = std.AutoHashMap(u32, @import("tokenizer.zig").Pair).init(self.allocator);
+        const split_table = std.HashMap(
+            u32,
+            @import("tokenizer.zig").Pair,
+            FnvHashContext(u32),
+            std.hash_map.default_max_load_percentage,
+        ).initContext(self.allocator, FnvHashContext(u32){});
 
         const next_prefix_match = try self.allocator.alloc(u32, 0); // Empty for trainer
 

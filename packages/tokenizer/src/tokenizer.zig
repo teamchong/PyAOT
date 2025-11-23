@@ -29,6 +29,9 @@ pub const TrieNode = helpers.TrieNode;
 pub const countPairsSIMD = helpers.countPairsSIMD;
 pub const mergePair = helpers.mergePair;
 
+// FnvHash for optimized HashMap lookups
+const FnvHashContext = @import("fnv_hash.zig").FnvHashContext;
+
 const builder = @import("tokenizer_builder.zig");
 const buildSplitTable = builder.buildSplitTable;
 const buildAhoCorasick = builder.buildAhoCorasick;
@@ -45,11 +48,11 @@ const getResultBuffer = cache.getResultBuffer;
 const releaseResultBuffer = cache.releaseResultBuffer;
 
 pub const Tokenizer = struct {
-    vocab: std.StringHashMap(u32),
+    vocab: std.HashMap([]const u8, u32, FnvHashContext([]const u8), std.hash_map.default_max_load_percentage),
     vocab_r: std.AutoHashMap(u32, []const u8),
     merges: std.ArrayList(Pair),
-    merges_map: std.HashMap(Pair, u32, PairContext, std.hash_map.default_max_load_percentage),
-    split_table: std.AutoHashMap(u32, Pair), // For merge validation: token -> (left, right)
+    merges_map: std.HashMap(Pair, u32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
+    split_table: std.HashMap(u32, Pair, FnvHashContext(u32), std.hash_map.default_max_load_percentage), // For merge validation: token -> (left, right)
     pattern_str: []const u8,
     trie: ?*TrieNode, // Fast longest-match lookup (optional - uses lots of memory)
     aho_corasick: ?AhoCorasick, // Fast vocab lookup for backtracking encoder

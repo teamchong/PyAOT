@@ -5,6 +5,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Pair = @import("tokenizer.zig").Pair;
 const PairContext = @import("tokenizer.zig").PairContext;
+const FnvHashContext = @import("fnv_hash.zig").FnvHashContext;
 
 /// Word with its frequency count
 pub const Word = struct {
@@ -19,7 +20,7 @@ pub const Word = struct {
 
 /// Parallel chunk for multi-threaded processing
 pub const ChunkResult = struct {
-    pair_counts: std.HashMap(Pair, i32, PairContext, std.hash_map.default_max_load_percentage),
+    pair_counts: std.HashMap(Pair, i32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
     allocator: Allocator,
 
     pub fn deinit(self: *ChunkResult) void {
@@ -44,7 +45,7 @@ pub const MergeCandidate = struct {
 /// Tracks which word indices contain each pair
 pub const PairPositions = struct {
     allocator: Allocator,
-    map: std.HashMap(Pair, std.ArrayList(usize), PairContext, std.hash_map.default_max_load_percentage),
+    map: std.HashMap(Pair, std.ArrayList(usize), FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
 
     pub fn init(allocator: Allocator) PairPositions {
         return .{
@@ -52,9 +53,9 @@ pub const PairPositions = struct {
             .map = std.HashMap(
                 Pair,
                 std.ArrayList(usize),
-                PairContext,
+                FnvHashContext(Pair),
                 std.hash_map.default_max_load_percentage,
-            ).initContext(allocator, PairContext{}),
+            ).initContext(allocator, FnvHashContext(Pair){}),
         };
     }
 
@@ -100,7 +101,7 @@ pub const PairPositions = struct {
 pub fn countPairsParallel(
     words: []const Word,
     allocator: Allocator,
-) !std.HashMap(Pair, i32, PairContext, std.hash_map.default_max_load_percentage) {
+) !std.HashMap(Pair, i32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage) {
     // FORCE single-threaded for profiling
     return countPairsSingleThreaded(words, allocator);
 }
@@ -108,7 +109,7 @@ pub fn countPairsParallel(
 pub fn countPairsParallelOLD(
     words: []const Word,
     allocator: Allocator,
-) !std.HashMap(Pair, i32, PairContext, std.hash_map.default_max_load_percentage) {
+) !std.HashMap(Pair, i32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage) {
     const cpu_count = try std.Thread.getCpuCount();
     const num_threads = @min(cpu_count, words.len);
 
@@ -135,9 +136,9 @@ pub fn countPairsParallelOLD(
             .pair_counts = std.HashMap(
                 Pair,
                 i32,
-                PairContext,
+                FnvHashContext(Pair),
                 std.hash_map.default_max_load_percentage,
-            ).initContext(allocator, PairContext{}),
+            ).initContext(allocator, FnvHashContext(Pair){}),
             .allocator = allocator,
         };
 
@@ -154,9 +155,9 @@ pub fn countPairsParallelOLD(
     var merged = std.HashMap(
         Pair,
         i32,
-        PairContext,
+        FnvHashContext(Pair),
         std.hash_map.default_max_load_percentage,
-    ).initContext(allocator, PairContext{});
+    ).initContext(allocator, FnvHashContext(Pair){});
 
     for (results) |*result| {
         var it = result.pair_counts.iterator();
@@ -176,7 +177,7 @@ pub fn countPairsParallelOLD(
 /// Count pairs in a chunk (SIMPLE like Rust - just iterate!)
 pub fn countPairsChunk(
     words: []const Word,
-    pair_counts: *std.HashMap(Pair, i32, PairContext, std.hash_map.default_max_load_percentage),
+    pair_counts: *std.HashMap(Pair, i32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage),
 ) void {
     for (words) |word| {
         if (word.ids.len < 2 or word.count == 0) continue;
@@ -201,13 +202,13 @@ pub fn countPairsChunk(
 pub fn countPairsSingleThreaded(
     words: []const Word,
     allocator: Allocator,
-) !std.HashMap(Pair, i32, PairContext, std.hash_map.default_max_load_percentage) {
+) !std.HashMap(Pair, i32, FnvHashContext(Pair), std.hash_map.default_max_load_percentage) {
     var pair_counts = std.HashMap(
         Pair,
         i32,
-        PairContext,
+        FnvHashContext(Pair),
         std.hash_map.default_max_load_percentage,
-    ).initContext(allocator, PairContext{});
+    ).initContext(allocator, FnvHashContext(Pair){});
 
     countPairsChunk(words, &pair_counts);
     return pair_counts;
