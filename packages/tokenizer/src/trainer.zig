@@ -2,9 +2,17 @@
 /// Ensures dead code elimination (unused algorithms → 0 bytes)
 const std = @import("std");
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
+const UnigramTokenizer = @import("unigram_tokenizer.zig").UnigramTokenizer;
 const BpeTrainer = @import("bpe_trainer.zig").BpeTrainer;
 const WordPieceTrainer = @import("wordpiece_trainer.zig").WordPieceTrainer;
-const UnigramTrainer = @import("unigram_trainer.zig").UnigramTrainer;
+const UnigramTrainer = @import("unigram_full_trainer.zig").UnigramTrainer;
+
+/// Result type for RuntimeTrainer (handles different tokenizer types)
+pub const TokenizerResult = union(Algorithm) {
+    BPE: Tokenizer,
+    WordPiece: Tokenizer,
+    Unigram: UnigramTokenizer,
+};
 
 /// Available training algorithms
 pub const Algorithm = enum {
@@ -91,18 +99,18 @@ pub const RuntimeTrainer = struct {
         }
     }
 
-    pub fn trainFromIterator(self: *RuntimeTrainer, texts: []const []const u8) !Tokenizer {
+    pub fn trainFromIterator(self: *RuntimeTrainer, texts: []const []const u8) !TokenizerResult {
         return switch (self.algorithm) {
             .BPE => if (build_options.include_bpe)
-                self.bpe_trainer.?.trainFromIterator(texts)
+                TokenizerResult{ .BPE = try self.bpe_trainer.?.trainFromIterator(texts) }
             else
                 error.AlgorithmNotIncluded,
             .WordPiece => if (build_options.include_wordpiece)
-                self.wordpiece_trainer.?.trainFromIterator(texts)
+                TokenizerResult{ .WordPiece = try self.wordpiece_trainer.?.trainFromIterator(texts) }
             else
                 error.AlgorithmNotIncluded,
             .Unigram => if (build_options.include_unigram)
-                self.unigram_trainer.?.trainFromIterator(texts)
+                TokenizerResult{ .Unigram = try self.unigram_trainer.?.trainFromIterator(texts) }
             else
                 error.AlgorithmNotIncluded,
         };

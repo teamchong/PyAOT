@@ -360,10 +360,11 @@ pub const PyString = pystring.PyString;
 const dict_module = @import("dict.zig");
 pub const PyDict = dict_module.PyDict;
 
-// HTTP, async, and JSON modules
+// HTTP, async, JSON, and regex modules
 pub const http = @import("http.zig");
 pub const async_runtime = @import("async.zig");
 pub const json = @import("json.zig");
+pub const re = @import("re.zig");
 
 // Export convenience functions
 pub const httpGet = http.getAsPyString;
@@ -372,6 +373,9 @@ pub const sleep = async_runtime.sleepAsync;
 pub const now = async_runtime.now;
 pub const jsonLoads = json.loads;
 pub const jsonDumps = json.dumps;
+pub const reCompile = re.compile;
+pub const reSearch = re.search;
+pub const reMatch = re.match;
 
 /// Format dict as Python dict string: {key: value, ...}
 /// Supports both StringHashMap and ArrayList(KV) for dict comprehensions

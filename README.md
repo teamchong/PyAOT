@@ -166,18 +166,32 @@ Benchmarked with [hyperfine](https://github.com/sharkdp/hyperfine) on macOS ARM6
 
 ### JSON Benchmark (100K iterations × 62KB realistic JSON)
 
-All benchmarks run with [hyperfine](https://github.com/sharkdp/hyperfine) on Apple Silicon using realistic 62KB JSON document (50 users, 30 products, 31 days analytics).
+All benchmarks run with [hyperfine](https://github.com/sharkdp/hyperfine) (5 runs, 2 warmup) on Apple Silicon using realistic 62KB JSON document (50 users, 30 products, 31 days analytics).
 
 **JSON Parse (100K × 62KB = 6.2GB processed):**
 
 | Implementation | Time | vs PyAOT | Correctness |
 |---------------|------|----------|-------------|
-| **PyAOT** | **10.4s ± 0.0s** | **1.00x** 🏆 | ✅ 100% |
-| Zig (std.json) | 24.2s ± 0.5s | 2.33x slower | ✅ 100% |
+| **PyAOT** | **11.0s ± 0.2s** | **1.00x** 🏆 | ✅ 100% |
+| Rust (serde_json) | 12.4s ± 0.1s | 1.13x slower | ✅ 100% |
+| Zig (std.json) | 23.9s ± 0.1s | 2.17x slower | ✅ 100% |
+| Python (stdlib) | 31.1s ± 0.8s | 2.82x slower | ✅ 100% |
+| Go (encoding/json) | 41.4s ± 0.2s | 3.75x slower | ✅ 100% |
 
-**🎉 PyAOT is the FASTEST JSON parser tested - 2.33x faster than Zig stdlib!**
+**JSON Stringify (100K × 62KB = 6.2GB processed):**
 
-**Optimization journey (42.4s → 10.4s = 4.08x faster):**
+| Implementation | Time | vs Rust | Correctness |
+|---------------|------|---------|-------------|
+| Rust (serde_json) | 4.6s ± 0.0s | 1.00x 🏆 | ✅ 100% |
+| Python (stdlib) | 19.3s ± 0.1s | 4.23x slower | ✅ 100% |
+| Go (encoding/json) | 22.5s ± 0.3s | 4.91x slower | ✅ 100% |
+| PyAOT | 32.6s ± 0.1s | 7.13x slower | ✅ 100% |
+
+**🎉 PyAOT has the FASTEST JSON parse - beats Rust serde_json (industry gold standard)!**
+
+Stringify needs optimization - planned using `std.ArrayList(u8).writer()` with pre-allocated capacity.
+
+**Parse optimization journey (42.4s → 11.0s = 3.85x faster):**
 1. **Single-pass SIMD:** Combined quote finding + escape detection (1.93x)
 2. **Arena allocator:** Reusable arena with `reset(.retain_capacity)` (1.67x)
 3. **Zero-copy keys:** `PyDict.setOwned()` takes ownership without duplication
@@ -239,16 +253,16 @@ All benchmarks run with [hyperfine](https://github.com/sharkdp/hyperfine) on App
 
 | Algorithm | PyAOT Status | Binary Size (Release) | HuggingFace | Training Benchmarked? |
 |-----------|-------------|----------------------|-------------|----------------------|
-| **BPE** (GPT-2, GPT-3, RoBERTa) | ✅ **100% (794 lines)** | **139KB** | ✅ | **✅ 7.78x faster** |
-| **WordPiece** (BERT, DistilBERT) | ✅ **100% (490 lines)** | **88KB** | ✅ | ⏳ Not yet |
-| **Unigram** (T5, ALBERT) | ✅ **100% (1,721 lines)** | **51KB** | ✅ | ⏳ Not yet |
+| **BPE** (GPT-2, GPT-3, RoBERTa) | ✅ **100% (794 lines)** | **139KB** | ✅ | **✅ 7.78x faster** 🏆 |
+| **WordPiece** (BERT, DistilBERT) | ✅ **100% (490 lines)** | **88KB** | ✅ | **❌ 1.94x slower** |
+| **Unigram** (T5, ALBERT) | ⏳ **Partial (lattice)** | **51KB** | ✅ | ❌ Not complete |
 
 **Implementation Status:**
-- **BPE**: 100% complete - production-ready, **7.78x faster than SentencePiece**
-- **WordPiece**: 100% complete - production-ready
-- **Unigram**: 100% complete - **loss-based pruning with nbest() A* search**
+- **BPE**: 100% complete - production-ready, **7.78x faster than SentencePiece** 🏆
+- **WordPiece**: 100% complete - **1.94x slower than HuggingFace** (needs optimization)
+- **Unigram**: Lattice/nbest/EM trainer complete, **blocked by Tokenizer refactor** (Tokenizer is BPE-specific, needs tagged union for multi-model support)
 
-**Total:** 3,005 lines of production-ready tokenization code
+**Total:** 1,284 lines of production-ready tokenization code (BPE + WordPiece)
 
 **Comptime Dead Code Elimination - Verified:**
 ```zig
@@ -310,10 +324,10 @@ $ pyaot build train.py
 # No flags, no config - automatic optimization!
 ```
 
-**PyAOT tokenization: 100% feature-complete!**
-- ✅ **BPE**: 100% complete (7.78x faster than SentencePiece)
-- ✅ **WordPiece**: 100% complete (BERT-style tokenization)
-- ✅ **Unigram**: 100% complete with loss-based pruning (1,721 lines)
+**PyAOT tokenization status:**
+- ✅ **BPE**: 100% complete (7.78x faster than SentencePiece) 🏆
+- ✅ **WordPiece**: 100% complete (1.94x slower than HuggingFace - needs optimization)
+- ⏳ **Unigram**: Lattice/nbest implemented, trainer integration pending
 
 ### Zero-Config Feature System (Comptime Dead Code Elimination)
 
@@ -352,8 +366,6 @@ tok.encode(segments[0]);  // Binary: 54KB (BPE + regex engine)
 Zig's compiler analyzes which functions you **actually call** and only includes those. No runtime checks, no feature flags, no config files - just import and use what you need.
 
 **This is how PyAOT stays fast:** "Swiss Army knife" features with "racing bicycle" size when you only need basic BPE.
-
-**Note on JSON performance:** Small JSON documents (<1KB) show competitive performance, but large documents (>62KB) are currently slower than Rust/Python. See [JSON Benchmark section](#json-benchmark-100k-iterations--62kb-realistic-json) above for detailed results.
 
 **Regex Pattern Matching (× 100,000 iterations, find ALL matches in text):**
 

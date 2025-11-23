@@ -1,99 +1,170 @@
 #!/bin/bash
-# Quick benchmark for rapid iteration (3 fastest libraries, 100 iterations)
+# Quick JSON Stringify Benchmark - PyAOT vs Rust (10K iterations for fast feedback)
 set -e
 cd "$(dirname "$0")"
 
-echo "⚡ Quick Benchmark (for rapid iteration)"
-echo "═══════════════════════════════════════"
-echo "Testing: PyAOT, rs-bpe, TokenDagger, tiktoken"
-echo "Iterations: 100 (vs 1000 in full benchmark)"
+echo "⚡ Quick JSON Stringify Benchmark (10K iterations)"
+echo "═══════════════════════════════════════════════════"
 echo ""
 
-# Auto-build TokenDagger if needed
-TOKENDAGGER_DIR="/Users/steven_chong/downloads/repos/TokenDagger"
-if [ -d "$TOKENDAGGER_DIR" ]; then
-    if [ ! -f "$TOKENDAGGER_DIR/tokendagger/_tokendagger_core"*.so ]; then
-        echo "🔨 Building TokenDagger..."
-        cd "$TOKENDAGGER_DIR"
-        if [ ! -d "extern/pybind11/include" ]; then
-            git submodule update --init --recursive > /dev/null 2>&1
-        fi
-        g++ -std=c++17 -O2 -fPIC -w \
-            -I./src/tiktoken -I./src -I./extern/pybind11/include \
-            -I/opt/homebrew/opt/pcre2/include \
-            $(python3-config --includes) \
-            -shared -undefined dynamic_lookup \
-            -o tokendagger/_tokendagger_core.cpython-312-darwin.so \
-            src/py_binding.cpp src/tiktoken/libtiktoken.a \
-            -L/opt/homebrew/opt/pcre2/lib -lpcre2-8 > /dev/null 2>&1
-        cd - > /dev/null
-        echo "✅ TokenDagger built"
-    fi
+# Create sample.json if not exists
+if [ ! -f sample.json ]; then
+    python3 <<'PYGEN'
+import json
+
+data = {
+    "metadata": {
+        "version": "2.0.0",
+        "timestamp": "2025-01-23T12:00:00Z",
+        "source": "PyAOT Benchmark"
+    },
+    "users": [
+        {
+            "id": i,
+            "name": f"User {i}",
+            "email": f"user{i}@example.com",
+            "active": i % 2 == 0,
+            "score": float(i * 3.14159),
+            "tags": ["python", "rust", "zig"] if i % 3 == 0 else ["go", "typescript"]
+        }
+        for i in range(50)
+    ],
+    "products": [
+        {
+            "sku": f"PROD-{i:04d}",
+            "name": f"Product {i}",
+            "price": round(19.99 + i * 5.50, 2),
+            "inStock": i % 3 != 0
+        }
+        for i in range(30)
+    ]
+}
+
+with open('sample.json', 'w') as f:
+    json.dump(data, f)
+
+import os
+size_kb = os.path.getsize('sample.json') / 1024
+print(f"✅ Created sample.json ({size_kb:.1f} KB)")
+PYGEN
 fi
 
-[ ! -f benchmark_data.json ] && python3 generate_benchmark_data.py
+# Build PyAOT stringify benchmark (10K iterations)
+echo "🔨 Building PyAOT stringify benchmark..."
+cat > bench_pyaot_json_stringify_quick.zig <<'ZIGEOF'
+const std = @import("std");
+const runtime = @import("src/runtime.zig");
+const json_module = @import("src/json.zig");
+const allocator_helper = @import("src/allocator_helper.zig");
 
-BENCH_DIR="$(pwd)"
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
 
-# Create quick benchmark scripts (100 iterations instead of 1000)
-cat > /tmp/bench_quick_rsbpe.py <<PYEOF
-import json
-from rs_bpe.bpe import openai
-texts = json.load(open('${BENCH_DIR}/benchmark_data.json'))['texts']
-tok = openai.cl100k_base()
-for _ in range(100):
-    for t in texts: tok.encode(t)
-PYEOF
+    const base_allocator = allocator_helper.getBenchmarkAllocator(gpa);
 
-cat > /tmp/bench_quick_tiktoken.py <<PYEOF
-import json, tiktoken
-texts = json.load(open('${BENCH_DIR}/benchmark_data.json'))['texts']
-enc = tiktoken.get_encoding("cl100k_base")
-for _ in range(100):
-    for t in texts: enc.encode(t)
-PYEOF
+    const file = try std.fs.cwd().openFile("sample.json", .{});
+    defer file.close();
+    const json_data = try file.readToEndAlloc(base_allocator, 1024 * 1024);
+    defer base_allocator.free(json_data);
 
-cat > /tmp/bench_quick_tokendagger.py <<PYEOF
-import sys, json, tiktoken as tk
-sys.path.insert(0, '/Users/steven_chong/downloads/repos/TokenDagger')
-from tokendagger import wrapper
-texts = json.load(open('${BENCH_DIR}/benchmark_data.json'))['texts']
-tk_enc = tk.get_encoding("cl100k_base")
-enc = wrapper.Encoding(
-    name="cl100k_base",
-    pat_str=tk_enc._pat_str,
-    mergeable_ranks=tk_enc._mergeable_ranks,
-    special_tokens=tk_enc._special_tokens
+    const json_str = try runtime.PyString.create(base_allocator, json_data);
+    defer runtime.decref(json_str, base_allocator);
+
+    var arena = std.heap.ArenaAllocator.init(base_allocator);
+    defer arena.deinit();
+    const arena_allocator = arena.allocator();
+
+    const parsed = try json_module.loads(json_str, arena_allocator);
+
+    // Stringify 10K times (10x faster than 100K for quick iteration)
+    var i: usize = 0;
+    while (i < 10_000) : (i += 1) {
+        const result = try json_module.dumps(parsed, base_allocator);
+        runtime.decref(result, base_allocator);
+    }
+}
+ZIGEOF
+
+zig build-exe bench_pyaot_json_stringify_quick.zig -O ReleaseFast -lc -femit-bin=/tmp/bench_pyaot_json_stringify_quick 2>&1 | head -10
+if [ -f /tmp/bench_pyaot_json_stringify_quick ]; then
+    echo "✅ PyAOT stringify benchmark built"
+    PYAOT_AVAILABLE=true
+else
+    echo "❌ PyAOT build failed"
+    PYAOT_AVAILABLE=false
+fi
+
+# Build Rust stringify benchmark (10K iterations)
+echo "🔨 Building Rust stringify benchmark..."
+mkdir -p /tmp/bench_json_stringify_rust_quick_project/src
+cd /tmp/bench_json_stringify_rust_quick_project
+
+cat > Cargo.toml <<'CARGOEOF'
+[package]
+name = "bench_json_stringify_rust_quick"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_json = "1.0"
+CARGOEOF
+
+cat > src/main.rs <<'RUSTEOF'
+use std::fs;
+
+fn main() {
+    let json_data = fs::read_to_string("sample.json").expect("Failed to read");
+    let parsed: serde_json::Value = serde_json::from_str(&json_data).expect("Failed to parse");
+
+    for _ in 0..10_000 {
+        let _stringified = serde_json::to_string(&parsed).expect("Failed to stringify");
+    }
+}
+RUSTEOF
+
+if command -v cargo &> /dev/null; then
+    cargo build --release 2>&1 | tail -5
+    cp target/release/bench_json_stringify_rust_quick /tmp/bench_json_stringify_rust_quick 2>/dev/null || true
+    cd - > /dev/null
+    if [ -f /tmp/bench_json_stringify_rust_quick ]; then
+        echo "✅ Rust stringify benchmark built"
+        RUST_AVAILABLE=true
+    else
+        echo "❌ Rust build failed"
+        RUST_AVAILABLE=false
+    fi
+else
+    echo "⚠️  Rust not available"
+    RUST_AVAILABLE=false
+    cd - > /dev/null
+fi
+
+echo ""
+echo "Running benchmarks (10K iterations, 5 runs)..."
+echo ""
+
+# Build hyperfine command
+STRINGIFY_CMD=(
+    hyperfine
+    --warmup 2
+    --runs 5
+    --export-markdown bench_quick_results.md
 )
-for _ in range(100):
-    for t in texts: enc.encode(t)
-PYEOF
 
-# PyAOT native benchmark (calls tokenizer_bench directly)
-# tokenizer_bench already does 100 iterations internally
-cat > /tmp/bench_quick_pyaot.sh <<SHEOF
-#!/bin/bash
-cd ${BENCH_DIR}
-./zig-out/bin/tokenizer_bench 100
-SHEOF
-chmod +x /tmp/bench_quick_pyaot.sh
+if [ "$PYAOT_AVAILABLE" = true ]; then
+    STRINGIFY_CMD+=(--command-name "PyAOT" "/tmp/bench_pyaot_json_stringify_quick")
+fi
 
-echo "Running hyperfine (583 texts × 100 iterations, 3 runs)..."
-echo ""
+if [ "$RUST_AVAILABLE" = true ]; then
+    STRINGIFY_CMD+=(--command-name "Rust" "/tmp/bench_json_stringify_rust_quick")
+fi
 
-# Run hyperfine with 3 runs instead of 5
-hyperfine \
-    --warmup 1 \
-    --runs 3 \
-    --export-markdown bench_quick_results.md \
-    --ignore-failure \
-    --command-name "PyAOT" "/tmp/bench_quick_pyaot.sh" \
-    --command-name "rs-bpe" "python3 /tmp/bench_quick_rsbpe.py" \
-    --command-name "TokenDagger" "python3 /tmp/bench_quick_tokendagger.py" \
-    --command-name "tiktoken" "python3 /tmp/bench_quick_tiktoken.py"
+"${STRINGIFY_CMD[@]}"
 
 echo ""
-echo "📊 Quick results (100 iterations):"
+echo "📊 Quick results:"
 cat bench_quick_results.md
 echo ""
-echo "💡 For full benchmark (1000 iterations): make benchmark-encoding"
+echo "✅ Quick benchmark complete!"
+echo "💡 For full benchmark (100K iterations, all languages): make benchmark-json"

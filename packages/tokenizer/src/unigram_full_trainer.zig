@@ -7,7 +7,7 @@ const Allocator = std.mem.Allocator;
 const Unigram = @import("unigram_model.zig").Unigram;
 const VocabEntry = @import("unigram_model.zig").VocabEntry;
 const Lattice = @import("unigram_lattice.zig").Lattice;
-const Tokenizer = @import("tokenizer.zig").Tokenizer;
+const UnigramTokenizer = @import("unigram_tokenizer.zig").UnigramTokenizer;
 const suffix_array = @import("suffix_array.zig");
 
 /// Digamma function (derivative of log gamma) for Bayesian EM
@@ -57,7 +57,18 @@ pub const UnigramTrainer = struct {
     config: UnigramTrainerConfig,
     allocator: Allocator,
 
-    pub fn init(allocator: Allocator, config: UnigramTrainerConfig) UnigramTrainer {
+    /// Initialize with vocab size (matches BPE/WordPiece API)
+    pub fn init(vocab_size: usize, allocator: Allocator) !UnigramTrainer {
+        return UnigramTrainer{
+            .config = UnigramTrainerConfig{
+                .vocab_size = @intCast(vocab_size),
+            },
+            .allocator = allocator,
+        };
+    }
+
+    /// Initialize with custom config
+    pub fn initWithConfig(allocator: Allocator, config: UnigramTrainerConfig) UnigramTrainer {
         return UnigramTrainer{
             .config = config,
             .allocator = allocator,
@@ -510,6 +521,26 @@ pub const UnigramTrainer = struct {
         }
 
         return try Unigram.init(self.allocator, vocab, 0);
+    }
+
+    /// Train from text iterator (matches BPE/WordPiece API)
+    pub fn trainFromIterator(self: *UnigramTrainer, texts: []const []const u8) !UnigramTokenizer {
+        // Convert texts to sentences (all with count=1)
+        var sentences = try self.allocator.alloc(Sentence, texts.len);
+        defer self.allocator.free(sentences);
+
+        for (texts, 0..) |text, i| {
+            sentences[i] = Sentence{
+                .text = text,
+                .count = 1,
+            };
+        }
+
+        // Train the model
+        const model = try self.train(sentences);
+
+        // Create tokenizer
+        return UnigramTokenizer.init(model, self.allocator);
     }
 };
 

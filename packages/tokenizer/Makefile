@@ -44,10 +44,10 @@ benchmark-train:
 	@./bench_training.sh
 	@echo ""
 
-# Quick benchmark (PyAOT vs TokenDagger only - for fast iteration)
-benchmark-quick: build
+# Quick benchmark (PyAOT vs Rust JSON stringify - for fast iteration)
+benchmark-quick:
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
-	@echo "$(GREEN)⚡ Quick Benchmark: PyAOT vs TokenDagger (hyperfine)$(RESET)"
+	@echo "$(GREEN)⚡ Quick Benchmark: PyAOT vs Rust JSON Stringify$(RESET)"
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(RESET)"
 	@echo ""
 	@./bench_hyperfine.sh

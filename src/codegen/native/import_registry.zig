@@ -108,6 +108,7 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator) !ImportRegistry {
     try registry.register("json", .zig_runtime, "runtime.json", null);
     try registry.register("http", .zig_runtime, "runtime.http", null);
     try registry.register("asyncio", .zig_runtime, "runtime.async", null);
+    try registry.register("re", .zig_runtime, "runtime.re", null);
 
     // Tier 2: C library wrappers
     try registry.register("numpy", .c_library, "@import(\"c_interop\").numpy", "openblas");

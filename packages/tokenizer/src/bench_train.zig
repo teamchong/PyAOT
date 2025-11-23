@@ -2,6 +2,7 @@ const std = @import("std");
 const build_options = @import("build_options");
 const trainer_mod = @import("trainer.zig");
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
+const UnigramTokenizer = @import("unigram_tokenizer.zig").UnigramTokenizer;
 const allocator_helper = @import("allocator_helper.zig");
 
 // Algorithm selection based on build options
@@ -15,7 +16,7 @@ else
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    const allocator = allocator_helper.getBenchmarkAllocator(gpa);
+    const allocator = allocator_helper.getBenchmarkAllocator(&gpa);
 
     const VOCAB_SIZE = 32000;
 
@@ -45,33 +46,94 @@ pub fn main() !void {
     // Train 300 times to match HuggingFace benchmark (amortize startup overhead)
     const start = std.time.nanoTimestamp();
 
-    var last_tokenizer: ?Tokenizer = null;
-    var i: usize = 0;
-    while (i < 300) : (i += 1) {
-        var trainer = try Trainer.init(VOCAB_SIZE, allocator);
-        const tokenizer = try trainer.trainFromIterator(texts.items);
-        trainer.deinit();
+    // Check if we're training Unigram (different tokenizer type)
+    const is_unigram = comptime std.mem.eql(u8, build_options.default_algorithm, "Unigram");
 
-        // Keep last one for saving
-        if (last_tokenizer) |*tok| {
-            tok.deinit();
+    if (comptime is_unigram) {
+        // Unigram returns UnigramTokenizer
+        var last_tokenizer: ?UnigramTokenizer = null;
+        var i: usize = 0;
+        while (i < 300) : (i += 1) {
+            var trainer = if (build_options.runtime_selection)
+                try Trainer.init(VOCAB_SIZE, allocator, .Unigram)
+            else
+                try Trainer.init(VOCAB_SIZE, allocator);
+            const result = try trainer.trainFromIterator(texts.items);
+            trainer.deinit();
+
+            // Extract UnigramTokenizer (handle both runtime and comptime cases)
+            const tokenizer = if (build_options.runtime_selection) blk: {
+                // Runtime selection returns TokenizerResult union
+                break :blk switch (result) {
+                    .Unigram => |tok| tok,
+                    else => unreachable,
+                };
+            } else result; // Comptime selection returns UnigramTokenizer directly
+
+            // Keep last one for saving
+            if (last_tokenizer) |*tok| {
+                tok.deinit();
+            }
+            last_tokenizer = tokenizer;
         }
-        last_tokenizer = tokenizer;
+
+        const end = std.time.nanoTimestamp();
+        const elapsed_ms = @divFloor(end - start, 1_000_000);
+
+        // Save last trained model for verification
+        if (last_tokenizer) |*tok| {
+            defer tok.deinit();
+            std.debug.print("Saving to pyaot_trained.json...\n", .{});
+            tok.saveToFile("pyaot_trained.json") catch |err| {
+                std.debug.print("ERROR saving file: {}\n", .{err});
+                return err;
+            };
+            std.debug.print("✅ Saved successfully!\n", .{});
+        }
+
+        std.debug.print("{d}ms\n", .{elapsed_ms});
+    } else {
+        // BPE/WordPiece return regular Tokenizer
+        var last_tokenizer: ?Tokenizer = null;
+        var i: usize = 0;
+        while (i < 300) : (i += 1) {
+            var trainer = if (build_options.runtime_selection)
+                try Trainer.init(VOCAB_SIZE, allocator, std.meta.stringToEnum(trainer_mod.Algorithm, build_options.default_algorithm) orelse .BPE)
+            else
+                try Trainer.init(VOCAB_SIZE, allocator);
+            const result = try trainer.trainFromIterator(texts.items);
+            trainer.deinit();
+
+            // Extract Tokenizer (handle both runtime and comptime cases)
+            const tokenizer = if (build_options.runtime_selection) blk: {
+                // Runtime selection returns TokenizerResult union
+                break :blk switch (result) {
+                    .BPE, .WordPiece => |tok| tok,
+                    else => unreachable,
+                };
+            } else result; // Comptime selection returns Tokenizer directly
+
+            // Keep last one for saving
+            if (last_tokenizer) |*tok| {
+                tok.deinit();
+            }
+            last_tokenizer = tokenizer;
+        }
+
+        const end = std.time.nanoTimestamp();
+        const elapsed_ms = @divFloor(end - start, 1_000_000);
+
+        // Save last trained model for verification
+        if (last_tokenizer) |*tok| {
+            defer tok.deinit();
+            std.debug.print("Saving to pyaot_trained.json...\n", .{});
+            tok.saveToFile("pyaot_trained.json") catch |err| {
+                std.debug.print("ERROR saving file: {}\n", .{err});
+                return err;
+            };
+            std.debug.print("✅ Saved successfully!\n", .{});
+        }
+
+        std.debug.print("{d}ms\n", .{elapsed_ms});
     }
-
-    const end = std.time.nanoTimestamp();
-    const elapsed_ms = @divFloor(end - start, 1_000_000);
-
-    // Save last trained model for verification
-    if (last_tokenizer) |*tok| {
-        defer tok.deinit();
-        std.debug.print("Saving to pyaot_trained.json...\n", .{});
-        tok.saveToFile("pyaot_trained.json") catch |err| {
-            std.debug.print("ERROR saving file: {}\n", .{err});
-            return err;
-        };
-        std.debug.print("✅ Saved successfully!\n", .{});
-    }
-
-    std.debug.print("{d}ms\n", .{elapsed_ms});
 }
