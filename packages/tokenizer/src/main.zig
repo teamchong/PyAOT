@@ -38,9 +38,8 @@ fn simdAdd(comptime T: type, comptime len: comptime_int, a: [len]T, b: [len]T) [
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // Use c_allocator (jemalloc/system allocator) for better perf
+    const allocator = std.heap.c_allocator;
 
     std.debug.print("\n🚀 PyAOT Tokenizer Benchmark\n", .{});
     std.debug.print("=" ** 60 ++ "\n\n", .{});

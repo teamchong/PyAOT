@@ -287,7 +287,8 @@ pub const Tokenizer = struct {
 
         // Pre-allocate result (use original allocator for return value)
         var result = std.ArrayList(u32){};
-        try result.ensureTotalCapacity(self.allocator, text.len / 4);
+        // FIX 2: Increase pre-allocation from text.len/4 to text.len (avoid growth)
+        try result.ensureTotalCapacity(self.allocator, text.len);
         errdefer result.deinit(self.allocator);
 
         // Iterate through chunks (zero allocations for splitting!)

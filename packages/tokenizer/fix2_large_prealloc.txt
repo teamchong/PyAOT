@@ -1,0 +1,50 @@
+[0;33m🔨 Building native binaries...[0m
+[0;32m✅ Build complete:[0m
+   - tokenizer_bench
+   - bench_native
+   - bench_train
+   - test_correctness
+
+[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+[0;32m⚡ Quick Benchmark: PyAOT vs TokenDagger (hyperfine)[0m
+[0;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[0m
+
+⚡ Quick Benchmark (for rapid iteration)
+═══════════════════════════════════════
+Testing: PyAOT, rs-bpe, TokenDagger, tiktoken
+Iterations: 100 (vs 1000 in full benchmark)
+
+Running hyperfine (583 texts × 100 iterations, 3 runs)...
+
+Benchmark 1: PyAOT
+  Time (mean ± σ):      1.922 s ±  0.010 s    [User: 1.067 s, System: 0.846 s]
+  Range (min … max):    1.913 s …  1.933 s    3 runs
+ 
+Benchmark 2: rs-bpe
+  Time (mean ± σ):     607.1 ms ±   1.3 ms    [User: 585.1 ms, System: 16.2 ms]
+  Range (min … max):   606.2 ms … 608.6 ms    3 runs
+ 
+Benchmark 3: TokenDagger
+  Time (mean ± σ):     966.2 ms ±   7.7 ms    [User: 921.4 ms, System: 37.2 ms]
+  Range (min … max):   958.1 ms … 973.5 ms    3 runs
+ 
+Benchmark 4: tiktoken
+  Time (mean ± σ):      1.483 s ±  0.031 s    [User: 1.445 s, System: 0.029 s]
+  Range (min … max):    1.459 s …  1.518 s    3 runs
+ 
+Summary
+  rs-bpe ran
+    1.59 ± 0.01 times faster than TokenDagger
+    2.44 ± 0.05 times faster than tiktoken
+    3.17 ± 0.02 times faster than PyAOT
+
+📊 Quick results (100 iterations):
+| Command | Mean [s] | Min [s] | Max [s] | Relative |
+|:---|---:|---:|---:|---:|
+| `PyAOT` | 1.922 ± 0.010 | 1.913 | 1.933 | 3.17 ± 0.02 |
+| `rs-bpe` | 0.607 ± 0.001 | 0.606 | 0.609 | 1.00 |
+| `TokenDagger` | 0.966 ± 0.008 | 0.958 | 0.973 | 1.59 ± 0.01 |
+| `tiktoken` | 1.483 ± 0.031 | 1.459 | 1.518 | 2.44 ± 0.05 |
+
+💡 For full benchmark (1000 iterations): make benchmark-encoding
+
