@@ -9,7 +9,7 @@
  * 3. sum_list(list) -> sum of all elements
  */
 
-#include "../../include/Python.h"
+#include "../include/Python.h"
 #include <stdio.h>
 
 /* ============================================================================

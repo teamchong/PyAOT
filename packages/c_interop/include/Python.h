@@ -159,6 +159,26 @@ extern PyObject* Py_BuildValue(const char *format, ...);
 #define Py_SIZE(op) (((PyVarObject*)(op))->ob_size)
 
 /* ============================================================================
+ * MODULE/METHOD DEFINITIONS
+ * ============================================================================ */
+
+/* Method calling flags */
+#define METH_VARARGS  0x0001
+#define METH_KEYWORDS 0x0002
+#define METH_NOARGS   0x0004
+#define METH_O        0x0008
+
+/* Method definition structure */
+typedef PyObject *(*PyCFunction)(PyObject *, PyObject *);
+
+typedef struct PyMethodDef {
+    const char *ml_name;   /* Method name */
+    PyCFunction ml_meth;   /* C function pointer */
+    int ml_flags;          /* Calling convention flags */
+    const char *ml_doc;    /* Docstring */
+} PyMethodDef;
+
+/* ============================================================================
  * COMMON SINGLETONS (TODO: Implement)
  * ============================================================================ */
 
