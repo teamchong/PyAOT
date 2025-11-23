@@ -4,6 +4,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Builder = @import("aho_corasick_builder.zig").Builder;
+const simd = @import("simd_encoder.zig");
 
 const ROOT_STATE_IDX: u32 = 0;
 const BLOCK_LEN: u32 = 256;
@@ -72,36 +73,78 @@ pub const AhoCorasick = struct {
 
     /// Port of daachorse leftmost_find_iter().next()
     /// Find the leftmost-longest match starting at position `start`
+    /// Optimized with loop unrolling and pointer arithmetic
     pub fn longestMatch(self: *const AhoCorasick, text: []const u8, start: usize) ?u32 {
         @setRuntimeSafety(false);
 
         if (start >= text.len) return null;
 
+        const states = self.states.ptr;
+        const outputs = self.outputs.ptr;
+        const states_len = self.states.len;
+
         var state_id: u32 = ROOT_STATE_IDX;
         var longest_token: ?u32 = null;
-
         var pos = start;
-        while (pos < text.len) : (pos += 1) {
+
+        // Unroll first 8 iterations for better branch prediction and reduced loop overhead
+        // Most BPE tokens are 1-8 bytes, so this covers the common case
+        comptime var i = 0;
+        inline while (i < 8) : (i += 1) {
+            if (pos >= text.len) return longest_token;
+
             const c = text[pos];
+            const state = states[state_id];
+            const base = state.base;
 
-            // Strict prefix match: only follow children, no failure links
-            if (self.childIndexUnchecked(state_id, c)) |child_id| {
-                state_id = child_id;
-            } else {
-                break;
-            }
+            // No children - we're done
+            if (base == 0) return longest_token;
 
-            // Check output - record if this is the longest match so far
-            const output_pos = self.states[state_id].output_pos;
+            const child_idx = base ^ c;
+
+            // Combined bounds check + validation
+            if (child_idx >= states_len) return longest_token;
+
+            const child_state = states[child_idx];
+            if (child_state.check != c) return longest_token;
+
+            state_id = child_idx;
+
+            // Check for output
+            const output_pos = child_state.output_pos;
             if (output_pos != 0) {
-                longest_token = self.outputs[output_pos];
+                longest_token = outputs[output_pos];
+
+                // Early exit if we found a match and can't extend
+                if (child_state.base == 0) return longest_token;
             }
 
-            // CRITICAL: If we have a match and can't extend further, stop
-            // This implements leftmost-longest: we found the longest match starting at `start`
-            if (longest_token != null and !self.canExtend(state_id)) {
-                break;
+            pos += 1;
+        }
+
+        // Continuation loop for longer matches (rare case)
+        while (pos < text.len) {
+            const c = text[pos];
+            const state = states[state_id];
+            const base = state.base;
+
+            if (base == 0) break;
+
+            const child_idx = base ^ c;
+            if (child_idx >= states_len) break;
+
+            const child_state = states[child_idx];
+            if (child_state.check != c) break;
+
+            state_id = child_idx;
+
+            const output_pos = child_state.output_pos;
+            if (output_pos != 0) {
+                longest_token = outputs[output_pos];
+                if (child_state.base == 0) break;
             }
+
+            pos += 1;
         }
 
         return longest_token;

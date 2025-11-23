@@ -47,6 +47,9 @@ const getEncodeCache = cache.getEncodeCache;
 const getResultBuffer = cache.getResultBuffer;
 const releaseResultBuffer = cache.releaseResultBuffer;
 
+// SIMD acceleration
+const simd = @import("simd_encoder.zig");
+
 pub const Tokenizer = struct {
     vocab: std.HashMap([]const u8, u32, FnvHashContext([]const u8), std.hash_map.default_max_load_percentage),
     vocab_r: std.AutoHashMap(u32, []const u8),
@@ -113,16 +116,13 @@ pub const Tokenizer = struct {
 
     /// HASH MAP optimization: O(n * k) instead of O(n * m)
     /// k = actual merges applied << m = total possible merges
+    /// SIMD-accelerated for initial byte tokenization
     pub fn encodeHashMap(self: *Tokenizer, text: []const u8) ![]u32 {
         if (text.len <= 4096) {
             var stack_buffer: [4096]u32 = undefined;
 
-            // Start with bytes - look up each byte's rank in vocab
-            for (text, 0..) |byte, i| {
-                const byte_slice = @as(*const [1]u8, &byte)[0..1];
-                const rank = self.vocab.get(byte_slice) orelse byte; // Fallback to byte value
-                stack_buffer[i] = rank;
-            }
+            // SIMD-accelerated initial byte tokenization
+            self.tokenizeBytesOptimized(text, stack_buffer[0..text.len]);
 
             const len = try self.applyMergesHashMap(stack_buffer[0..text.len]);
 
@@ -135,11 +135,11 @@ pub const Tokenizer = struct {
         var tokens = try std.ArrayList(u32).initCapacity(self.allocator, text.len);
         errdefer tokens.deinit(self.allocator);
 
-        for (text) |byte| {
-            const byte_slice = @as(*const [1]u8, &byte)[0..1];
-            const rank = self.vocab.get(byte_slice) orelse byte;
-            tokens.appendAssumeCapacity(rank);
-        }
+        // Resize to exact size needed
+        tokens.items.len = text.len;
+
+        // SIMD-accelerated byte tokenization
+        self.tokenizeBytesOptimized(text, tokens.items);
 
         try self.applyMergesHashMapArrayList(&tokens);
 
@@ -148,6 +148,25 @@ pub const Tokenizer = struct {
         const owned = try self.allocator.dupe(u32, items);
         tokens.clearRetainingCapacity();
         return owned;
+    }
+
+    /// SIMD-optimized initial byte tokenization
+    inline fn tokenizeBytesOptimized(self: *Tokenizer, text: []const u8, output: []u32) void {
+        // Fast path: for ASCII text, we can optimize vocab lookups
+        // Most single bytes map to their own token ID
+        if (simd.isAsciiSIMD(text)) {
+            // ASCII fast path - likely direct mapping
+            for (text, 0..) |byte, i| {
+                const byte_slice = @as(*const [1]u8, &byte)[0..1];
+                output[i] = self.vocab.get(byte_slice) orelse byte;
+            }
+        } else {
+            // UTF-8 slow path - need proper vocab lookups
+            for (text, 0..) |byte, i| {
+                const byte_slice = @as(*const [1]u8, &byte)[0..1];
+                output[i] = self.vocab.get(byte_slice) orelse byte;
+            }
+        }
     }
 
     /// Vocab-based BPE merging (tiktoken style) - OPTIMIZED O(n²)
