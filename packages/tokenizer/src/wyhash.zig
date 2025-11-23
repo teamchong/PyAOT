@@ -37,7 +37,7 @@ fn mix1(a: u64, b: u64, seed: u64) u64 {
 // Wyhash version which does not store internal state for handling partial buffers.
 // This is needed so that we can maximize the speed for the short key case, which will
 // use the non-iterative api which the public Wyhash exposes.
-const WyhashStateless = struct {
+pub const WyhashStateless = struct {
     seed: u64,
     msg_len: usize,
 

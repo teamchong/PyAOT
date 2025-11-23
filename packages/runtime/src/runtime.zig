@@ -366,11 +366,12 @@ pub const PyDict = dict_module.PyDict;
 pub const numpy_array = @import("numpy_array.zig");
 pub const NumpyArray = numpy_array.NumpyArray;
 
-// HTTP, async, JSON, and regex modules
+// HTTP, async, JSON, regex, and eval modules
 pub const http = @import("http.zig");
 pub const async_runtime = @import("async.zig");
 pub const json = @import("json.zig");
 pub const re = @import("re.zig");
+pub const eval_module = @import("eval.zig");
 
 // Export convenience functions
 pub const httpGet = http.getAsPyString;
@@ -382,6 +383,11 @@ pub const jsonDumps = json.dumps;
 pub const reCompile = re.compile;
 pub const reSearch = re.search;
 pub const reMatch = re.match;
+
+// Eval convenience exports
+pub const eval = eval_module.eval;
+pub const exec = eval_module.exec;
+pub const compile = eval_module.compile;
 
 /// Format dict as Python dict string: {key: value, ...}
 /// Supports both StringHashMap and ArrayList(KV) for dict comprehensions

@@ -20,6 +20,13 @@ pub fn main() !void {
 
     const VOCAB_SIZE = 32000;
 
+    // Allow runtime algorithm selection via ALGORITHM env var
+    // Example: ALGORITHM=Unigram ./bench_train
+    const selected_algorithm = if (std.posix.getenv("ALGORITHM")) |algo_str|
+        std.meta.stringToEnum(trainer_mod.Algorithm, algo_str) orelse .BPE
+    else
+        std.meta.stringToEnum(trainer_mod.Algorithm, build_options.default_algorithm) orelse .BPE;
+
     // Load realistic benchmark data
     const file = try std.fs.cwd().openFile("benchmark_data.json", .{});
     defer file.close();
@@ -47,15 +54,15 @@ pub fn main() !void {
     const start = std.time.nanoTimestamp();
 
     // Check if we're training Unigram (different tokenizer type)
-    const is_unigram = comptime std.mem.eql(u8, build_options.default_algorithm, "Unigram");
+    const is_unigram = selected_algorithm == .Unigram;
 
-    if (comptime is_unigram) {
+    if (is_unigram) {
         // Unigram returns UnigramTokenizer
         var last_tokenizer: ?UnigramTokenizer = null;
         var i: usize = 0;
         while (i < 300) : (i += 1) {
             var trainer = if (build_options.runtime_selection)
-                try Trainer.init(VOCAB_SIZE, allocator, .Unigram)
+                try Trainer.init(VOCAB_SIZE, allocator, selected_algorithm)
             else
                 try Trainer.init(VOCAB_SIZE, allocator);
             const result = try trainer.trainFromIterator(texts.items);

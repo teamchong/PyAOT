@@ -2,27 +2,16 @@
 /// Separated from runtime.zig for better code organization
 const std = @import("std");
 const runtime = @import("runtime.zig");
-const wyhash = @import("wyhash.zig");
-
-/// Fast string hash context using wyhash (same as Bun)
-const WyhashContext = struct {
-    pub fn hash(_: @This(), key: []const u8) u64 {
-        return wyhash.WyhashStateless.init(0).update(key).final();
-    }
-
-    pub fn eql(_: @This(), a: []const u8, b: []const u8) bool {
-        return std.mem.eql(u8, a, b);
-    }
-};
+const hashmap_helper = @import("hashmap_helper.zig");
 
 /// Python dict type (optimized with wyhash - faster iteration than StringHashMap!)
 pub const PyDict = struct {
-    map: std.HashMap([]const u8, *runtime.PyObject, WyhashContext, std.hash_map.default_max_load_percentage),
+    map: hashmap_helper.StringHashMap(*runtime.PyObject),
 
     pub fn create(allocator: std.mem.Allocator) !*runtime.PyObject {
         const obj = try allocator.create(runtime.PyObject);
         const dict_data = try allocator.create(PyDict);
-        dict_data.map = std.HashMap([]const u8, *runtime.PyObject, WyhashContext, std.hash_map.default_max_load_percentage).init(allocator);
+        dict_data.map = hashmap_helper.StringHashMap(*runtime.PyObject).init(allocator);
 
         obj.* = runtime.PyObject{
             .ref_count = 1,

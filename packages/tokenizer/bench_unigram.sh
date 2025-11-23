@@ -17,9 +17,9 @@ if [ ! -f benchmark_data.json ]; then
     echo ""
 fi
 
-# Build bench_train for Unigram using build.zig
-echo "Building Unigram trainer..."
-zig build -Dinclude_bpe=false -Dinclude_wordpiece=false -Dinclude_unigram=true -Doptimize=ReleaseFast
+# Build bench_train (all algorithms included, dead code elimination handles unused code)
+echo "Building trainer..."
+zig build -Doptimize=ReleaseFast
 
 cat > /tmp/bench_hf_unigram.py << 'PYEOF'
 import json

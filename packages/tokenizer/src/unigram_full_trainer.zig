@@ -464,14 +464,8 @@ pub const UnigramTrainer = struct {
         const desired_vocab_size = (self.config.vocab_size * 11) / 10;  // 1.1x target
         std.debug.print("[PROFILE] Target vocab: {d}, Desired: {d}\n", .{self.config.vocab_size, desired_vocab_size});
 
-        // Lattice caching (created lazily on first EM iteration)
-        var cached_lattices_opt: ?[]Lattice = null;
-        defer if (cached_lattices_opt) |cached| {
-            for (cached) |*lattice| {
-                lattice.deinit();
-            }
-            self.allocator.free(cached);
-        };
+        // Lattice caching disabled (causes hang - TODO: debug clearNodes)
+        const cached_lattices_opt: ?[]Lattice = null;
 
         // 2. EM iterations
         var em_iteration: u32 = 0;
