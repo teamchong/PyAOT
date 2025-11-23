@@ -96,7 +96,7 @@ pub fn compileZig(allocator: std.mem.Allocator, zig_code: []const u8, output_pat
     const import_flag = try std.fmt.allocPrint(aa, "-I{s}", .{build_dir});
     try args.append(aa, import_flag);
 
-    try args.append(aa, "-ODebug");
+    try args.append(aa, "-OReleaseFast");
     try args.append(aa, "-lc");
 
     // Add dynamically detected C libraries
@@ -248,7 +248,7 @@ pub fn compileZigSharedLib(allocator: std.mem.Allocator, zig_code: []const u8, o
     try args.append(allocator, "build-lib");
     try args.append(allocator, tmp_path);
     try args.append(allocator, i_flag);
-    try args.append(allocator, "-ODebug");
+    try args.append(allocator, "-OReleaseFast");
     try args.append(allocator, "-dynamic");
     try args.append(allocator, "-lc");
 
