@@ -178,19 +178,19 @@ All benchmarks run with [hyperfine](https://github.com/sharkdp/hyperfine) on App
 - Win rate: 100% (5/5 runs beat rs-bpe)
 - System overhead: 0.033s (1.3%) - excellent!
 
-**Web/WASM Encoding (583 texts × 300 iterations):**
+**Web/WASM Encoding (583 texts × 100 iterations):**
 
 | Library | Time | vs PyAOT | Size |
 |---------|------|----------|------|
-| **PyAOT (WASM)** | **51.0ms ± 0.9ms** | **1.00x** 🏆 | **46KB** |
-| gpt-tokenizer (JS) | 1.315s ± 0.082s | 25.8x slower | 1.1MB |
-| @anthropic-ai/tokenizer (JS) | 12.991s ± 0.153s | 254.7x slower | 8.6MB |
-| tiktoken (WASM) | >180s (timeout) | >3529x slower | 1.0MB |
+| **PyAOT (WASM)** | **50.2ms ± 1.2ms** | **1.00x** 🏆 | **46KB** |
+| gpt-tokenizer (JS) | 491.9ms ± 15.1ms | 9.81x slower | 1.1MB |
+| @anthropic-ai/tokenizer (JS) | 4.271s ± 0.039s | 85.14x slower | 8.6MB |
+| tiktoken (WASM) | 5.804s ± 0.034s | 115.71x slower | 1.0MB |
 
-**🎉 PyAOT WASM dominates: 26-3529x faster, 22-187x smaller!**
-- **255x faster than @anthropic-ai/tokenizer** (51ms vs 13s)
-- **>3529x faster than tiktoken WASM** (51ms vs >180s)
-- **26x faster than gpt-tokenizer**
+**🎉 PyAOT WASM dominates: 10-116x faster, 22-187x smaller!**
+- **116x faster than tiktoken WASM** (50.2ms vs 5.8s)
+- **85x faster than @anthropic-ai/tokenizer**
+- **10x faster than gpt-tokenizer**
 - **22x smaller than tiktoken WASM** (46KB vs 1.0MB)
 - **187x smaller than @anthropic-ai** (46KB vs 8.6MB)
 
