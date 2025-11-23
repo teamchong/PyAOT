@@ -1,8 +1,7 @@
 /// Public JSON API for PyAOT - json.loads() and json.dumps()
 const std = @import("std");
 const runtime = @import("runtime.zig");
-const parse_module = @import("json/parse.zig");
-const JsonValue = @import("json/value.zig").JsonValue;
+const parse_direct = @import("json/parse_direct.zig");
 
 /// Deserialize JSON string to PyObject
 /// Python: json.loads(json_str) -> obj
@@ -15,14 +14,8 @@ pub fn loads(json_str: *runtime.PyObject, allocator: std.mem.Allocator) !*runtim
     const str_data: *runtime.PyString = @ptrCast(@alignCast(json_str.data));
     const json_bytes = str_data.data;
 
-    // Parse JSON into intermediate JsonValue
-    var json_value = try parse_module.parse(json_bytes, allocator);
-
-    // Convert to PyObject (duplicates all strings)
-    const result = try json_value.toPyObject(allocator);
-
-    // Clean up JsonValue and all its allocated data (strings were duplicated above)
-    json_value.deinit(allocator);
+    // Parse JSON directly to PyObject (no intermediate representation!)
+    const result = try parse_direct.parse(json_bytes, allocator);
 
     return result;
 }

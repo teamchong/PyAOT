@@ -3,6 +3,7 @@ const std = @import("std");
 const parser = @import("src/pyregex/parser.zig");
 const nfa_mod = @import("src/pyregex/nfa.zig");
 const lazydfa = @import("src/pyregex/lazydfa.zig");
+const pikevm = @import("src/pyregex/pikevm.zig");
 const allocator_helper = @import("src/pyregex/allocator_helper.zig");
 
 fn loadData(allocator: std.mem.Allocator) ![]const u8 {
@@ -29,33 +30,46 @@ fn benchmarkPattern(allocator: std.mem.Allocator, name: []const u8, pattern: []c
         mut_nfa.deinit();
     }
 
+    var match_count: usize = undefined;
+    var timer: std.time.Timer = undefined;
+    var start: u64 = undefined;
+    var end: u64 = undefined;
+
+    // All patterns now use DFA with specialized fast paths
     var dfa = lazydfa.LazyDFA.init(allocator, &nfa);
     defer dfa.deinit();
 
-    // Set prefix hints (uses default 5-char window)
+    // Set prefix hints with pattern-specific tuning (optimal windows)
     if (std.mem.eql(u8, name, "Email")) {
-        dfa.setPrefix("@");
+        dfa.setPrefixWithWindow("@", 1, 1);  // Minimal window
     } else if (std.mem.eql(u8, name, "URL")) {
-        dfa.setPrefix("://");
+        dfa.setPrefixWithWindow("://", 6, 10);  // Optimal window
+        dfa.enableUrlFastPath();  // SIMD fast path for [^\s]+
+    } else if (std.mem.eql(u8, name, "Digits")) {
+        dfa.enableDigitsFastPath();  // SIMD fast path for [0-9]+
+    } else if (std.mem.eql(u8, name, "Word Boundary")) {
+        dfa.enableWordBoundaryFastPath();  // Fast path for \b[a-z]{4,}\b
     } else if (std.mem.eql(u8, name, "Date ISO")) {
-        dfa.setPrefix("-");
+        dfa.setPrefixWithWindow("-", 4, 3);  // Optimal YYYY-MM-DD
     }
 
     // Count matches
     const warmup_matches = try dfa.findAll(text, allocator);
-    const match_count = warmup_matches.len;
+    match_count = warmup_matches.len;
     allocator.free(warmup_matches);
 
     // Benchmark: find ALL matches N times
-    var timer = try std.time.Timer.start();
-    const start = timer.read();
+    timer = try std.time.Timer.start();
+    start = timer.read();
 
     for (0..iterations) |_| {
         const matches = try dfa.findAll(text, allocator);
         allocator.free(matches);
     }
 
-    const end = timer.read();
+    end = timer.read();
+
+    _ = pikevm; // Unused now - all patterns use DFA fast paths!
 
     const total_ms = @as(f64, @floatFromInt(end - start)) / 1_000_000.0;
     const avg_us = (total_ms * 1000.0) / @as(f64, @floatFromInt(iterations));

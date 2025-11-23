@@ -1,6 +1,6 @@
-| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
+| Command | Mean [s] | Min [s] | Max [s] | Relative |
 |:---|---:|---:|---:|---:|
-| `Python (stringify)` | 62.4 ± 6.1 | 56.2 | 71.6 | 10.00 ± 1.37 |
-| `PyAOT (stringify)` | 6.2 ± 0.6 | 5.6 | 7.0 | 1.00 |
-| `Rust (stringify)` | 8.6 ± 1.1 | 7.4 | 10.4 | 1.38 ± 0.22 |
-| `Go (stringify)` | 32.1 ± 0.6 | 31.3 | 32.8 | 5.14 ± 0.51 |
+| `Python (stringify)` | 19.407 ± 0.076 | 19.324 | 19.518 | 3.45 ± 0.75 |
+| `PyAOT (stringify)` | 32.867 ± 0.082 | 32.764 | 32.971 | 5.84 ± 1.27 |
+| `Rust (stringify)` | 5.626 ± 1.224 | 4.649 | 7.114 | 1.00 |
+| `Go (stringify)` | 22.272 ± 0.145 | 22.111 | 22.437 | 3.96 ± 0.86 |

@@ -5,9 +5,9 @@ set -e
 
 echo "⚡ BPE Training Benchmark (hyperfine)"
 echo "============================================================"
-echo "Training: 583 texts × 30 iterations"
+echo "Training: 583 texts × 300 iterations"
 echo "PyAOT/HF: vocab 32000 | SentencePiece: vocab 2066 (BPE max)"
-echo "Python startup overhead ~2% with 30 training runs"
+echo "Python startup overhead ~0.2% with 300 training runs"
 echo ""
 
 # Generate benchmark data if needed
@@ -35,8 +35,8 @@ with open('benchmark_data.json') as f:
 
 VOCAB_SIZE = 32000
 
-# Train 30 times to amortize Python startup overhead
-for _ in range(30):
+# Train 300 times to amortize Python startup overhead
+for _ in range(300):
     tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
     trainer = trainers.BpeTrainer(
         vocab_size=VOCAB_SIZE,
@@ -62,9 +62,9 @@ with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
         f.write(text + "\n")
     temp_file = f.name
 
-# Train 30 times to amortize Python startup overhead
+# Train 300 times to amortize Python startup overhead
 # SentencePiece BPE max vocab for this corpus: 2066
-for i in range(30):
+for i in range(300):
     spm.SentencePieceTrainer.train(
         input=temp_file,
         model_prefix=f'temp_spm_{i}',

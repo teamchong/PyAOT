@@ -1,5 +1,6 @@
 const std = @import("std");
 const Trainer = @import("trainer.zig").Trainer;
+const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const allocator_helper = @import("allocator_helper.zig");
 
 pub fn main() !void {
@@ -32,23 +33,36 @@ pub fn main() !void {
         try texts.append(allocator, owned_text);
     }
 
-    // Train
-    var trainer = try Trainer.init(VOCAB_SIZE, allocator);
-    defer trainer.deinit();
-
+    // Train 300 times to match HuggingFace benchmark (amortize startup overhead)
     const start = std.time.nanoTimestamp();
-    var tokenizer = try trainer.trainFromIterator(texts.items);
-    defer tokenizer.deinit();
+
+    var last_tokenizer: ?Tokenizer = null;
+    var i: usize = 0;
+    while (i < 300) : (i += 1) {
+        var trainer = try Trainer.init(VOCAB_SIZE, allocator);
+        const tokenizer = try trainer.trainFromIterator(texts.items);
+        trainer.deinit();
+
+        // Keep last one for saving
+        if (last_tokenizer) |*tok| {
+            tok.deinit();
+        }
+        last_tokenizer = tokenizer;
+    }
+
     const end = std.time.nanoTimestamp();
     const elapsed_ms = @divFloor(end - start, 1_000_000);
 
-    // Save trained model for verification
-    std.debug.print("Saving to pyaot_trained.json...\n", .{});
-    tokenizer.saveToFile("pyaot_trained.json") catch |err| {
-        std.debug.print("ERROR saving file: {}\n", .{err});
-        return err;
-    };
-    std.debug.print("✅ Saved successfully!\n", .{});
+    // Save last trained model for verification
+    if (last_tokenizer) |*tok| {
+        defer tok.deinit();
+        std.debug.print("Saving to pyaot_trained.json...\n", .{});
+        tok.saveToFile("pyaot_trained.json") catch |err| {
+            std.debug.print("ERROR saving file: {}\n", .{err});
+            return err;
+        };
+        std.debug.print("✅ Saved successfully!\n", .{});
+    }
 
     std.debug.print("{d}ms\n", .{elapsed_ms});
 }

@@ -143,7 +143,8 @@ pub const WordPiece = struct {
         }
     }
 
-    /// Find most frequent adjacent character pair in words
+    /// Find most frequent adjacent TOKEN pair in words
+    /// CRITICAL: This must tokenize with current vocab, not just look at characters!
     fn findBestPair(self: *WordPiece, word_counts: *std.StringHashMap(u32)) !?[]const u8 {
         var pair_counts = std.StringHashMap(u32).init(self.allocator);
         defer {
@@ -154,21 +155,25 @@ pub const WordPiece = struct {
             pair_counts.deinit();
         }
 
-        // Count all adjacent character pairs in words
+        // Count all adjacent TOKEN pairs (not character pairs!)
         var word_it = word_counts.iterator();
         while (word_it.next()) |word_entry| {
             const word = word_entry.key_ptr.*;
             const count = word_entry.value_ptr.*;
 
-            // Count pairs of adjacent characters
-            if (word.len < 2) continue;
+            // Tokenize word with CURRENT vocabulary
+            const tokens = try self.tokenizeWord(word);
+            defer self.allocator.free(tokens);
 
-            var i: usize = 0;
-            while (i < word.len - 1) : (i += 1) {
-                // Create 2-character pair
-                const pair = try self.allocator.alloc(u8, 2);
-                pair[0] = word[i];
-                pair[1] = word[i + 1];
+            // Count adjacent token pairs
+            if (tokens.len < 2) continue;
+
+            for (0..tokens.len - 1) |i| {
+                const left = tokens[i];
+                const right = tokens[i + 1];
+
+                // Create concatenated pair
+                const pair = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ left, right });
 
                 const gop = try pair_counts.getOrPut(pair);
                 if (gop.found_existing) {
