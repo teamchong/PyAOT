@@ -306,6 +306,11 @@ pub const LazyDFA = struct {
             return try self.findAllWordBoundary(text, allocator);
         }
 
+        // OPTIMIZED fast path for URL pattern (bypasses prefix scanning)
+        if (self.use_url_fast_path) {
+            return try self.findAllUrlFastPath(text, allocator);
+        }
+
         // Use prefix scanning if available
         if (self.prefix_literal) |prefix| {
             return try self.findAllWithPrefix(text, allocator, prefix);

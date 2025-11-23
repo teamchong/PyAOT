@@ -20,6 +20,21 @@ pub const PyDict = struct {
         return obj;
     }
 
+    /// Create PyDict with pre-allocated capacity (avoids HashMap resizing)
+    pub fn createWithCapacity(allocator: std.mem.Allocator, capacity: usize) !*runtime.PyObject {
+        const obj = try allocator.create(runtime.PyObject);
+        const dict_data = try allocator.create(PyDict);
+        dict_data.map = std.StringHashMap(*runtime.PyObject).init(allocator);
+        try dict_data.map.ensureTotalCapacity(@intCast(capacity));
+
+        obj.* = runtime.PyObject{
+            .ref_count = 1,
+            .type_id = .dict,
+            .data = dict_data,
+        };
+        return obj;
+    }
+
     pub fn set(obj: *runtime.PyObject, key: []const u8, value: *runtime.PyObject) !void {
         std.debug.assert(obj.type_id == .dict);
         const data: *PyDict = @ptrCast(@alignCast(obj.data));

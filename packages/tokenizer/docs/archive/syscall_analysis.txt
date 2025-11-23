@@ -1,6 +1,0 @@
-        3.22 real         1.18 user         1.64 sys
-           106233856  maximum resident set size
-              489029  page reclaims
-                   0  page faults
-                   5  voluntary context switches
-                2978  involuntary context switches
