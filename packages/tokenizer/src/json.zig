@@ -37,17 +37,27 @@ pub fn dumps(obj: *runtime.PyObject, allocator: std.mem.Allocator) !*runtime.PyO
     return try runtime.PyString.createOwned(allocator, result_str);
 }
 
+/// Comptime string table - avoids strlen at runtime
+const JSON_NULL = "null";
+const JSON_TRUE = "true";
+const JSON_FALSE = "false";
+const JSON_ZERO = "0.0";
+
 /// Direct stringify - writes to ArrayList without writer() overhead
 fn stringifyPyObjectDirect(obj: *runtime.PyObject, buffer: *std.ArrayList(u8), allocator: std.mem.Allocator) !void {
-    switch (obj.type_id) {
-        .none => try buffer.appendSlice(allocator, "null"),
+    // Cache type_id to reduce pointer chasing
+    const type_id = obj.type_id;
+    switch (type_id) {
+        .none => {
+            // Unsafe direct write - we pre-allocated so capacity is guaranteed
+            const slice = buffer.addManyAsSlice(allocator, JSON_NULL.len) catch unreachable;
+            @memcpy(slice, JSON_NULL);
+        },
         .bool => {
             const data: *runtime.PyInt = @ptrCast(@alignCast(obj.data));
-            if (data.value != 0) {
-                try buffer.appendSlice(allocator, "true");
-            } else {
-                try buffer.appendSlice(allocator, "false");
-            }
+            const str = if (data.value != 0) JSON_TRUE else JSON_FALSE;
+            const slice = buffer.addManyAsSlice(allocator, str.len) catch unreachable;
+            @memcpy(slice, str);
         },
         .int => {
             const data: *runtime.PyInt = @ptrCast(@alignCast(obj.data));

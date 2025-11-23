@@ -139,15 +139,17 @@ pub const Lattice = struct {
         }
 
         // Recreate BOS and EOS nodes (required for lattice to work)
+        // BOS: node_id=0, pos=0, length=0, ends at position 0
         const bos = self.allocator.create(Node) catch unreachable;
         bos.* = Node.init(self.bos_id, 0, 0, 0, 0.0);
         self.nodes.append(self.allocator, bos) catch unreachable;
-        self.begin_nodes.items[0].append(self.allocator, bos) catch unreachable;
+        self.end_nodes.items[0].append(self.allocator, bos) catch unreachable;
 
+        // EOS: node_id=1, pos=len, length=0, begins at position len
         const eos = self.allocator.create(Node) catch unreachable;
         eos.* = Node.init(self.eos_id, 1, self.len, 0, 0.0);
         self.nodes.append(self.allocator, eos) catch unreachable;
-        self.end_nodes.items[self.len].append(self.allocator, eos) catch unreachable;
+        self.begin_nodes.items[self.len].append(self.allocator, eos) catch unreachable;
     }
 
     /// Insert a token candidate into the lattice

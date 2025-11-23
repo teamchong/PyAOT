@@ -162,20 +162,11 @@ pub const UnigramTrainer = struct {
                         entry.value_ptr.* = 0;
                     }
                     entry.value_ptr.* += sentence.count;
-
-                    // Stop if we have enough pieces
-                    if (ngram_freqs.count() >= self.config.seed_size) {
-                        break;
-                    }
                 }
-                if (ngram_freqs.count() >= self.config.seed_size) {
-                    break;
-                }
-            }
-            if (ngram_freqs.count() >= self.config.seed_size) {
-                break;
             }
         }
+
+        std.debug.print("[PROFILE] Generated {d} unique n-grams from sentences\n", .{ngram_freqs.count()});
 
         // Convert ngram map to pieces list
         var ngram_it = ngram_freqs.iterator();
@@ -261,8 +252,9 @@ pub const UnigramTrainer = struct {
         var new_pieces = std.ArrayList(SentencePiece){};
 
         var sum: f64 = 0.0;
-        const expected_frequency_threshold = 0.5;
 
+        // M-step: Keep ALL tokens, update scores based on expected counts
+        // Vocabulary reduction happens in pruning step, not here
         for (pieces, expected, 0..) |piece, freq, i| {
             // Always keep UNK (index 0)
             if (i == 0) {
@@ -274,7 +266,8 @@ pub const UnigramTrainer = struct {
                 continue;
             }
 
-            if (freq < expected_frequency_threshold) {
+            // Keep all tokens with any expected count > 0
+            if (freq <= 0.0) {
                 continue;
             }
 
@@ -462,10 +455,13 @@ pub const UnigramTrainer = struct {
         const seed_ms = @divFloor(std.time.nanoTimestamp() - start_seed, 1_000_000);
         std.debug.print("[PROFILE] Seed generation: {d}ms ({d} pieces)\n", .{seed_ms, pieces.items.len});
 
-        const desired_vocab_size = (self.config.vocab_size * 11) / 10;  // 1.1x target
+        // Start with smaller desired size to allow multiple EM iterations
+        // HuggingFace uses (vocab_size * 1.1), but with our seed generation we need lower target
+        const desired_vocab_size = (self.config.vocab_size * 8) / 10;  // 0.8x target = 25,600
         std.debug.print("[PROFILE] Target vocab: {d}, Desired: {d}\n", .{self.config.vocab_size, desired_vocab_size});
 
-        // Lattice caching disabled (causes hang - TODO: debug clearNodes)
+        // Lattice caching disabled - adds overhead without benefit (only 1 EM iteration)
+        // TODO: Re-enable when we have multiple EM iterations per training run
         const cached_lattices_opt: ?[]Lattice = null;
 
         // 2. EM iterations
@@ -493,7 +489,7 @@ pub const UnigramTrainer = struct {
                 var model = try Unigram.init(self.allocator, vocab, 0);
                 defer model.deinit();
 
-                // TODO: Lattice caching disabled (causes hang - needs clearNodes debugging)
+                // Lattice caching disabled (see above)
                 // if (cached_lattices_opt == null and em_iteration == 1 and iter == 0) {
                 //     const start_cache = std.time.nanoTimestamp();
                 //     var cached_lattices = try self.allocator.alloc(Lattice, sentences.len);
