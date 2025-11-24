@@ -39,6 +39,13 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "runtime_selection", runtime_selection);
     options.addOption([]const u8, "default_algorithm", default_algorithm);
 
+    // Add threading module
+    const threading_module = b.createModule(.{
+        .root_source_file = b.path("../threading/src/ThreadPool.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Training benchmark binary
     const bench_train = b.addExecutable(.{
         .name = "bench_train",
@@ -48,6 +55,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    bench_train.root_module.addImport("threading", threading_module);
     bench_train.root_module.addOptions("build_options", options);
     b.installArtifact(bench_train);
 

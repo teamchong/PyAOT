@@ -86,6 +86,39 @@ pub const RuntimeTrainer = struct {
         return trainer;
     }
 
+    pub fn initWithThreadPool(vocab_size: usize, allocator: std.mem.Allocator, algorithm: Algorithm, thread_pool: *ThreadPool) !RuntimeTrainer {
+        var trainer = RuntimeTrainer{
+            .algorithm = algorithm,
+            .allocator = allocator,
+        };
+
+        switch (algorithm) {
+            .BPE => {
+                if (build_options.include_bpe) {
+                    trainer.bpe_trainer = try BpeTrainer.init(vocab_size, allocator);
+                } else {
+                    return error.AlgorithmNotIncluded;
+                }
+            },
+            .WordPiece => {
+                if (build_options.include_wordpiece) {
+                    trainer.wordpiece_trainer = try WordPieceTrainer.init(vocab_size, allocator);
+                } else {
+                    return error.AlgorithmNotIncluded;
+                }
+            },
+            .Unigram => {
+                if (build_options.include_unigram) {
+                    trainer.unigram_trainer = try UnigramTrainer.initWithThreadPool(vocab_size, allocator, thread_pool);
+                } else {
+                    return error.AlgorithmNotIncluded;
+                }
+            },
+        }
+
+        return trainer;
+    }
+
     pub fn deinit(self: *RuntimeTrainer) void {
         switch (self.algorithm) {
             .BPE => if (build_options.include_bpe) {

@@ -67,10 +67,12 @@ pub fn main() !void {
         var last_tokenizer: ?UnigramTokenizer = null;
         var i: usize = 0;
         while (i < 300) : (i += 1) {
-            var trainer = if (build_options.runtime_selection)
-                try Trainer.initWithThreadPool(VOCAB_SIZE, allocator, selected_algorithm, &thread_pool)
-            else
-                try Trainer.initWithThreadPool(VOCAB_SIZE, allocator, &thread_pool);
+            var trainer = if (build_options.runtime_selection) blk: {
+                break :blk try Trainer.initWithThreadPool(VOCAB_SIZE, allocator, selected_algorithm, &thread_pool);
+            } else blk: {
+                // Comptime selection - Trainer is UnigramTrainer directly
+                break :blk try Trainer.initWithThreadPool(VOCAB_SIZE, allocator, &thread_pool);
+            };
             const result = try trainer.trainFromIterator(texts.items);
             trainer.deinit();
 
