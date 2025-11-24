@@ -28,9 +28,27 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    const object_protocol_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/cpython_object_protocol.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const unicode_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/cpython_unicode.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
     const test_step = b.step("test", "Run c_interop unit tests");
     test_step.dependOn(&b.addRunArtifact(tests).step);
     test_step.dependOn(&b.addRunArtifact(registry_tests).step);
+    test_step.dependOn(&b.addRunArtifact(object_protocol_tests).step);
+    test_step.dependOn(&b.addRunArtifact(unicode_tests).step);
 
     _ = c_interop_mod;
 }

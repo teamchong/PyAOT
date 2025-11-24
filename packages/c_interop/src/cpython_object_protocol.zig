@@ -88,9 +88,9 @@ export fn PyObject_GetAttr(obj: *cpython.PyObject, name: *cpython.PyObject) call
 /// Returns: Attribute value or null on error
 export fn PyObject_GetAttrString(obj: *cpython.PyObject, name: [*:0]const u8) callconv(.c) ?*cpython.PyObject {
     const name_obj = PyUnicode_FromString(name) orelse return null;
-    defer Py_DECREF(name_obj.?);
+    defer Py_DECREF(name_obj);
 
-    return PyObject_GetAttr(obj, name_obj.?);
+    return PyObject_GetAttr(obj, name_obj);
 }
 
 /// Set attribute by name object
@@ -119,9 +119,9 @@ export fn PyObject_SetAttr(obj: *cpython.PyObject, name: *cpython.PyObject, valu
 /// Returns: 0 on success, -1 on error
 export fn PyObject_SetAttrString(obj: *cpython.PyObject, name: [*:0]const u8, value: *cpython.PyObject) callconv(.c) c_int {
     const name_obj = PyUnicode_FromString(name) orelse return -1;
-    defer Py_DECREF(name_obj.?);
+    defer Py_DECREF(name_obj);
 
-    return PyObject_SetAttr(obj, name_obj.?, value);
+    return PyObject_SetAttr(obj, name_obj, value);
 }
 
 /// Check if attribute exists by name object
@@ -153,9 +153,9 @@ export fn PyObject_HasAttr(obj: *cpython.PyObject, name: *cpython.PyObject) call
 /// Returns: 1 if exists, 0 if not
 export fn PyObject_HasAttrString(obj: *cpython.PyObject, name: [*:0]const u8) callconv(.c) c_int {
     const name_obj = PyUnicode_FromString(name) orelse return 0;
-    defer Py_DECREF(name_obj.?);
+    defer Py_DECREF(name_obj);
 
-    return PyObject_HasAttr(obj, name_obj.?);
+    return PyObject_HasAttr(obj, name_obj);
 }
 
 /// ============================================================================
@@ -299,9 +299,48 @@ export fn PyObject_Hash(obj: *cpython.PyObject) callconv(.c) isize {
     return -1;
 }
 
-/// ============================================================================
-/// TESTS
-/// ============================================================================
+// ============================================================================
+// TEST STUBS (for unit testing only)
+// ============================================================================
+
+// Stub implementations for testing
+fn Py_INCREF_stub(obj: *cpython.PyObject) callconv(.c) void {
+    obj.ob_refcnt += 1;
+}
+fn Py_DECREF_stub(obj: *cpython.PyObject) callconv(.c) void {
+    obj.ob_refcnt -= 1;
+}
+fn PyErr_SetString_stub(exc: *cpython.PyObject, msg: [*:0]const u8) callconv(.c) void {
+    _ = exc;
+    _ = msg;
+}
+fn PyErr_Occurred_stub() callconv(.c) ?*cpython.PyObject {
+    return null;
+}
+fn PyUnicode_FromString_stub(str: [*:0]const u8) callconv(.c) ?*cpython.PyObject {
+    _ = str;
+    return null;
+}
+
+comptime {
+    if (@import("builtin").is_test) {
+        @export(Py_INCREF_stub, .{ .name = "Py_INCREF", .linkage = .strong });
+        @export(Py_DECREF_stub, .{ .name = "Py_DECREF", .linkage = .strong });
+        @export(PyErr_SetString_stub, .{ .name = "PyErr_SetString", .linkage = .strong });
+        @export(PyErr_Occurred_stub, .{ .name = "PyErr_Occurred", .linkage = .strong });
+        @export(PyUnicode_FromString_stub, .{ .name = "PyUnicode_FromString", .linkage = .strong });
+
+        // Create stub exception objects
+        var PyExc_TypeError_stub = cpython.PyObject{ .ob_refcnt = 1, .ob_type = undefined };
+        var PyExc_AttributeError_stub = cpython.PyObject{ .ob_refcnt = 1, .ob_type = undefined };
+        @export(&PyExc_TypeError_stub, .{ .name = "PyExc_TypeError", .linkage = .strong });
+        @export(&PyExc_AttributeError_stub, .{ .name = "PyExc_AttributeError", .linkage = .strong });
+    }
+}
+
+// ============================================================================
+// TESTS
+// ============================================================================
 
 test "PyObject protocol basic structure" {
     const testing = std.testing;
