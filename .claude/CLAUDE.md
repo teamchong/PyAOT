@@ -93,6 +93,12 @@ zig build && ./zig-out/bin/metal0 file.py --force
 | requirements.txt | `packages/pkg/src/parse/requirements.zig` |
 | METADATA parser | `packages/pkg/src/parse/metadata.zig` |
 | RECORD parser | `packages/pkg/src/parse/record.zig` |
+| **Build Artifacts** | |
+| Build dirs module | `src/build_dirs.zig` |
+| Cache (generated .zig, .o) | `.metal0/cache/` |
+| Static archives | `.metal0/lib/` |
+| Final binaries | `.metal0/bin/` |
+| Runtime cache | `.metal0/runtime/` |
 | **Other** | |
 | Tests | `tests/{unit,integration,cpython}/` |
 | Benchmarks | `benchmarks/{fib,dict,string,json,regex,tokenizer}/` |
