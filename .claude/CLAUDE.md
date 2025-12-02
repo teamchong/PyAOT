@@ -4,6 +4,46 @@ AOT Python compiler. 30x faster than CPython.
 
 **[TODO List](TODO.md)** | **[Agents](AGENTS.md)**
 
+## PRIORITY 0: Bottom-Up Implementation Philosophy
+
+**NEVER patch individual cases. ALWAYS implement the full pattern.**
+
+When fixing a bug:
+1. **Identify the ROOT pattern** - What general case is this a symptom of?
+2. **Implement EXHAUSTIVELY** - Handle ALL variants of that pattern, not just the failing one
+3. **Add to switch exhaustively** - Use `else => @compileError("unhandled node type")` to catch future additions
+
+Example of WRONG approach:
+```zig
+// BAD: Adding cases one-by-one as tests fail
+.listcomp => handleListComp(),
+.dictcomp => handleDictComp(),
+// Next week: "oh, genexp is broken too"
+```
+
+Example of RIGHT approach:
+```zig
+// GOOD: Handle ALL expression types upfront
+.listcomp, .dictcomp, .genexp, .setcomp => |comp| handleComprehension(comp),
+else => @compileError("unhandled: add new node type here"),
+```
+
+**Why**: Hard work now = easy work later. Every exhaustive implementation is one less class of bugs forever.
+
+## CPython Test Execution
+
+**ALWAYS use `make test-cpython` for parallel testing!**
+
+```bash
+# Run ALL CPython tests in parallel (8 concurrent processes)
+make test-cpython
+
+# Single file (for debugging only)
+./zig-out/bin/metal0 tests/cpython/test_calendar.py --force
+```
+
+**DO NOT run tests sequentially.** The Makefile uses `xargs -P8` for 8x parallel execution.
+
 ## PRIORITY 1: Function Traits Framework
 
 **USE `src/analysis/function_traits.zig` FOR ALL ANALYSIS DECISIONS!**
