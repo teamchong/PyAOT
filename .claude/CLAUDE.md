@@ -101,7 +101,7 @@ zig build && ./zig-out/bin/metal0 file.py --force
 | Tokenizer | `packages/tokenizer/` |
 | Collections | `packages/collections/` |
 | Async | `packages/async_runtime/` |
-| C interop | `packages/c_interop/` |
+| C interop | `packages/c_interop/` - CPython C API replacement (exact 3.12 layouts) |
 | **Package Manager** | `packages/pkg/src/` |
 | PEP 440 (versions) | `packages/pkg/src/parse/pep440.zig` |
 | PEP 508 (deps) | `packages/pkg/src/parse/pep508.zig` |
@@ -132,6 +132,7 @@ zig build && ./zig-out/bin/metal0 file.py --force
 | List/dict method | `packages/runtime/src/runtime.zig` |
 | New module | `build.zig` (addModule) → `@import("name")` |
 | Type support | `src/analysis/type_inference.zig` |
+| C extension type | `packages/c_interop/src/pyobject_*.zig` - exact CPython memory layout |
 
 ## Code Patterns
 
@@ -142,6 +143,7 @@ zig build && ./zig-out/bin/metal0 file.py --force
 | JSON | `@import("json")` | NOT std.json |
 | Collections | `@import("collections")` | Generic dict/list |
 | HTTP Client | `@import("h2")` | `packages/shared/http/h2/h2.zig` - unified HTTP/1.1 & HTTP/2, TLS 1.3 |
+| C Extensions | `@import("c_interop")` | Load numpy/pandas via dlopen, exact CPython 3.12 ABI |
 
 ## Parser Helpers (`src/parser.zig`)
 
