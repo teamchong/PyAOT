@@ -32,17 +32,32 @@ else => @compileError("unhandled: add new node type here"),
 
 ## CPython Test Execution
 
-**ALWAYS use `make test-cpython` for parallel testing!**
+**NEVER run tests in a loop! Use these FAST commands:**
 
 ```bash
-# Run ALL CPython tests in parallel (8 concurrent processes)
+# FASTEST: Single file codegen check (1-2 seconds)
+./zig-out/bin/metal0 tests/cpython/test_bool.py --emit-zig --force
+
+# FAST: Single file full compile + run (5-10 seconds)
+./zig-out/bin/metal0 tests/cpython/test_bool.py --force
+
+# BATCH: All tests parallel (uses metal0 test command)
 make test-cpython
 
-# Single file (for debugging only)
-./zig-out/bin/metal0 tests/cpython/test_calendar.py --force
+# ERROR ANALYSIS: Grep generated .zig files for patterns
+ls .metal0/cache/*.zig | xargs grep -l "some_pattern"
 ```
 
-**DO NOT run tests sequentially.** The Makefile uses `xargs -P8` for 8x parallel execution.
+**NEVER DO THIS (wastes tokens + time):**
+```bash
+# BAD: Sequential loop over 390 tests
+for f in tests/cpython/*.py; do ./zig-out/bin/metal0 "$f" --force; done
+```
+
+**Test Strategy:**
+1. Fix ONE test file completely before moving to next
+2. Use `--emit-zig` to check codegen without compilation overhead
+3. Generated .zig files are in `.metal0/cache/` - read them directly
 
 ## PRIORITY 1: Function Traits Framework
 
