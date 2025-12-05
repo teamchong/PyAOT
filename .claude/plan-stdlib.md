@@ -312,8 +312,8 @@ For each module, compare against CPython and list:
 | `skipTest(reason)` | ✅ | SkipTest function |
 | `subTest(**params)` | ✅ | subTest, subTestInt |
 | `fail(msg)` | ✅ | runner.fail() raises AssertionError |
-| `id()` | ⬜ | Requires codegen - test method name |
-| `shortDescription()` | ⬜ | Requires codegen - docstring access |
+| `id()` | ✅ | TestCase.id() |
+| `shortDescription()` | ✅ | TestCase.shortDescription() |
 | `maxDiff` | ✅ | runner.maxDiff variable |
 
 #### Other unittest Classes
@@ -333,7 +333,7 @@ For each module, compare against CPython and list:
 | `@skip(reason)` | ✅ | Via skip_reason in codegen |
 | `@skipIf(condition, reason)` | ✅ | hasSkipIfModuleIsNone |
 | `@skipUnless(condition, reason)` | ✅ | hasSkipUnlessCPythonModule |
-| `@expectedFailure` | ⬜ | Requires codegen support |
+| `@expectedFailure` | ✅ | expectedFailure wrapper + ExpectedFailureResult |
 | `@mock.patch` | ✅ | countMockPatchDecorators |
 | `@mock.patch.object` | ✅ | |
 | `@support.cpython_only` | ✅ | hasCPythonOnlyDecorator |
@@ -594,7 +594,7 @@ For each module, compare against CPython and list:
 | `dst()` | ✅ | Timezone.dst |
 | `tzname()` | ✅ | Timezone.tzname |
 | `hour`, `minute`, `second`, `microsecond` | ✅ | Properties |
-| `tzinfo`, `fold` | ⬜ | fold not implemented |
+| `tzinfo`, `fold` | ✅ | Datetime.fold and Time.fold attributes |
 
 #### datetime
 
@@ -654,12 +654,9 @@ For each module, compare against CPython and list:
 | `timezone(offset, name)` | ✅ | Timezone struct |
 | `timezone.utc` | ✅ | UTC constant |
 
-**Summary**: ~85% method coverage
-**Well-implemented**: datetime.now, timedelta arithmetic, strftime, strptime, timezone
-**Remaining**:
-- ~~`fromisocalendar()` - Create from ISO calendar~~ ✅ Implemented
-- ~~`astimezone(tz)` - Convert to different timezone~~ ✅ Implemented
-- `fold` attribute - For ambiguous times
+**Summary**: ~100% method coverage ✅
+**Well-implemented**: datetime.now, timedelta arithmetic, strftime, strptime, timezone, fromisocalendar, astimezone, fold
+**Remaining**: None - all features implemented
 
 ---
 
@@ -921,8 +918,8 @@ For each module, compare against CPython and list:
 | `getgid()` | ✅ | getgid() |
 | `getegid()` | ✅ | getegid() |
 | `system(command)` | ✅ | system() via std.process.Child |
-| `fork()` | ⬜ | Platform-specific |
-| `execv(path, args)` | ⬜ | Platform-specific |
+| `fork()` | ✅ | os.fork() - POSIX only |
+| `execv(path, args)` | ✅ | os.execv() - POSIX only |
 
 #### System Info
 
