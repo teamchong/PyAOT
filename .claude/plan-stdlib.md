@@ -480,7 +480,7 @@ For each module, compare against CPython and list:
 | `clear()` | ✅ | |
 | `copy()` | ✅ | |
 | `count(x)` | ✅ | |
-| `index(x[, start[, stop]])` | 🔄 | No start/stop params |
+| `index(x[, start[, stop]])` | ✅ | indexRange with start/stop |
 | `insert(i, x)` | ✅ | |
 | `remove(value)` | ✅ | |
 | `reverse()` | ✅ | |
@@ -526,7 +526,7 @@ For each module, compare against CPython and list:
 | `__getitem__` | ✅ | Via get() |
 | `__setitem__` | ✅ | Via put() |
 | `__contains__` | ✅ | Via contains() |
-| Dict methods (keys, values, items, etc.) | 🔄 | Partial |
+| Dict methods (keys, values, items, etc.) | ✅ | Full (items, setdefault, pop, update, copy, len) |
 
 #### OrderedDict
 
@@ -537,7 +537,7 @@ For each module, compare against CPython and list:
 | `move_to_end(key, last=True)` | ✅ | |
 | `__reversed__` | ✅ | OrderedDict.reversed |
 | `__eq__` (order-sensitive) | ✅ | OrderedDict.eql |
-| Dict methods | 🔄 | Partial |
+| Dict methods | ✅ | Full (values, items, contains, update, len, pop, fromkeys) |
 
 #### UserDict, UserList, UserString
 
@@ -633,7 +633,7 @@ For each module, compare against CPython and list:
 
 | Method | Status | Notes |
 |--------|--------|-------|
-| `timedelta(days, secs, usec, ms, min, hrs, wks)` | 🔄 | Only days/secs/usec |
+| `timedelta(days, secs, usec, ms, min, hrs, wks)` | ✅ | Full: create() with all params |
 | `total_seconds()` | ✅ | totalSeconds |
 | `__add__` | ✅ | add |
 | `__sub__` | ✅ | sub |
@@ -912,7 +912,7 @@ For each module, compare against CPython and list:
 | Function | Status | Notes |
 |----------|--------|-------|
 | `getpid()` | ✅ | std.os.linux.getpid (Linux only) |
-| `getppid()` | 🔄 | Linux only, returns 0 on others |
+| `getppid()` | ✅ | All POSIX platforms via std.posix.system |
 | `getuid()` | ✅ | getuid() |
 | `geteuid()` | ✅ | geteuid() |
 | `getgid()` | ✅ | getgid() |
